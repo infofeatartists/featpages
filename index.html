@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FEAT. PAGES — Repair Directory</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ─── TOKENS ─────────────────────────────────────────────────── */
+:root {
+  --yellow: #fcdb05;
+  --black:  #1a1a1a;
+  --faint:  #555;
+  --white:  #ffffff;
+  --red:    #d62828;
+}
+
+/* ─── RESET ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+/* ─── BODY ───────────────────────────────────────────────────── */
+body {
+  background: #2a2a2a;
+  font-family: 'Oswald', sans-serif;
+  color: var(--black);
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px 48px;
+  min-height: 100vh;
+}
+
+/* ─── PAGE SHELL ─────────────────────────────────────────────── */
+.page {
+  background: var(--yellow);
+  width: 100%;
+  max-width: 1040px;
+  min-height: 100vh;
+  position: relative;
+  padding: 40px 44px 60px;
+  /* spine shadow + paper texture */
+  box-shadow:
+    inset 60px 0 60px -30px rgba(0,0,0,0.22),
+    inset -4px 0 12px -4px rgba(0,0,0,0.08),
+    12px 12px 40px rgba(0,0,0,0.55);
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 27px,
+      rgba(0,0,0,0.04) 27px,
+      rgba(0,0,0,0.04) 28px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.015) 3px,
+      rgba(0,0,0,0.015) 4px
+    );
+}
+
+@media (max-width: 600px) {
+  .page { padding: 24px 20px 48px; }
+}
+
+/* ─── MASTHEAD ───────────────────────────────────────────────── */
+.masthead {
+  border-bottom: 5px solid var(--black);
+  padding-bottom: 14px;
+  margin-bottom: 6px;
+}
+
+.masthead-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.brand-logo {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1;
+  text-transform: uppercase;
+  /* Fallback if image missing */
+}
+
+.brand-logo img {
+  max-height: 60px;
+  width: auto;
+  display: block;
+  filter: contrast(1.1);
+}
+
+.brand-sub {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--faint);
+}
+
+.masthead-meta {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  color: var(--faint);
+  line-height: 1.8;
+  text-transform: uppercase;
+}
+
+.masthead-tagline {
+  margin-top: 10px;
+  font-size: 13px;
+  font-family: 'Courier Prime', monospace;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-top: 1px solid rgba(0,0,0,0.15);
+  padding-top: 8px;
+}
+
+/* ─── CONTROLS ───────────────────────────────────────────────── */
+.controls {
+  margin: 18px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Category filter buttons */
+.cat-btn {
+  background: var(--black);
+  color: var(--yellow);
+  border: 2px solid var(--black);
+  padding: 7px 13px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+.cat-btn:hover,
+.cat-btn.active {
+  background: var(--white);
+  color: var(--black);
+  border-color: var(--black);
+}
+
+/* City select — same pill height as cat-btn */
+#cityFilter {
+  height: 36px;
+  padding: 0 10px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--black);
+  color: var(--yellow);
+  border: 2px solid var(--black);
+  cursor: pointer;
+  text-transform: uppercase;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23fcdb05' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+/* Add Business button */
+.add-btn {
+  background: var(--white);
+  color: var(--black);
+  border: 2px solid var(--black);
+  padding: 7px 14px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.add-btn:hover {
+  background: var(--black);
+  color: var(--yellow);
+}
+
+/* ─── SEARCH ─────────────────────────────────────────────────── */
+.search-wrap {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: rgba(0,0,0,0.06);
+  border: 2px dashed rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-wrap::before {
+  content: "⌕";
+  font-size: 22px;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+#searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--black);
+  font-family: 'Courier Prime', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 4px 2px;
+  outline: none;
+  text-transform: uppercase;
+  color: var(--black);
+  width: 100%;
+}
+
+#searchInput::placeholder {
+  color: rgba(0,0,0,0.3);
+  font-weight: 400;
+}
+
+/* ─── STATUS MESSAGE ─────────────────────────────────────────── */
+#statusMsg {
+  font-family: 'Courier Prime', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  padding: 60px 20px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--faint);
+  display: block;
+}
+
+#statusMsg.error { color: var(--red); }
+
+/* ─── RESULT COUNT ───────────────────────────────────────────── */
+#resultCount {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--faint);
+  margin-bottom: 16px;
+  display: none;
+}
+
+/* ─── DIRECTORY GRID ─────────────────────────────────────────── */
+#directory {
+  column-count: 3;
+  column-gap: 32px;
+  column-rule: 1px solid rgba(0,0,0,0.12);
+  display: none;
+}
+
+@media (max-width: 820px) { #directory { column-count: 2; } }
+@media (max-width: 500px) { #directory { column-count: 1; } }
+
+/* ─── CATEGORY BLOCK ─────────────────────────────────────────── */
+.cat-block { break-inside: avoid; margin-bottom: 28px; }
+
+.cat-heading {
+  background: var(--black);
+  color: var(--yellow);
+  font-size: 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  margin-bottom: 10px;
+  display: block;
+  width: 100%;
+  letter-spacing: 0.5px;
+}
+
+/* ─── LISTING CARD ───────────────────────────────────────────── */
+.listing {
+  break-inside: avoid;
+  margin-bottom: 14px;
+  border-bottom: 1px dotted rgba(0,0,0,0.25);
+  padding-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+  padding-left: 4px;
+}
+
+.listing:hover { background: rgba(255,255,255,0.35); }
+
+.l-name {
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1.15;
+  color: var(--black);
+}
+
+.l-city {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--faint);
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+
+.l-phone {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--black);
+  margin-top: 2px;
+  display: block;
+}
+
+.l-services {
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  color: var(--faint);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* ─── MODAL OVERLAY ──────────────────────────────────────────── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.82);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-overlay.open { display: flex; }
+
+/* ─── MODAL CARD ─────────────────────────────────────────────── */
+.modal-card {
+  background: var(--yellow);
+  width: 100%;
+  max-width: 460px;
+  border: 10px solid var(--black);
+  position: relative;
+  animation: modalIn 0.15s ease-out;
+}
+
+@keyframes modalIn {
+  from { transform: translateY(12px) scale(0.97); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+.modal-close {
+  position: absolute;
+  top: -42px;
+  right: -2px;
+  color: var(--white);
+  font-family: 'Courier Prime', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 6px 0;
+}
+
+.modal-close:hover { text-decoration: underline; }
+
+.modal-header {
+  background: var(--black);
+  color: var(--yellow);
+  padding: 14px 20px 10px;
+}
+
+.modal-biz-name {
+  font-size: 24px;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.modal-cat-badge {
+  display: inline-block;
+  border: 1px solid rgba(252,219,5,0.4);
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  margin-top: 6px;
+  letter-spacing: 1px;
+  color: rgba(252,219,5,0.8);
+}
+
+.modal-body { padding: 18px 20px 20px; }
+
+.modal-field {
+  margin-bottom: 12px;
+}
+
+.modal-field-label {
+  font-family: 'Courier Prime', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--faint);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.modal-field-val {
+  font-family: 'Courier Prime', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--black);
+  line-height: 1.5;
+}
+
+.modal-services-val {
+  background: rgba(0,0,0,0.07);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal-phone-row {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 2px solid var(--black);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-phone-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--black);
+  letter-spacing: -0.5px;
+}
+
+.modal-call-btn {
+  margin-left: auto;
+  background: var(--black);
+  color: var(--yellow);
+  border: none;
+  padding: 9px 16px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: opacity 0.15s;
+}
+.modal-call-btn:hover { opacity: 0.8; }
+
+/* ─── FOOTER ─────────────────────────────────────────────────── */
+.footer {
+  margin-top: 48px;
+  border-top: 2px solid var(--black);
+  padding-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: 'Courier Prime', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ── MASTHEAD ─────────────────────────────────── -->
+  <header class="masthead">
+    <div class="masthead-top">
+      <div class="brand">
+        <div class="brand-logo">
+          <img src="index1html.png" alt="FEAT. PAGES"
+               onerror="this.outerHTML='<span style=\'font-size:36px;font-weight:700;font-family:Oswald,sans-serif;\'>FEAT. PAGES</span>'">
+        </div>
+        <span class="brand-sub">India Repair Directory</span>
+      </div>
+      <div class="masthead-meta">
+        Crowdsourced &amp; Community-verified<br>
+        Tailors · Cobblers · Dyers · Cleaners
+      </div>
+    </div>
+    <div class="masthead-tagline">
+      Repair. Reuse. Respect the craft. — Submit your local repair-wallah below.
+    </div>
+  </header>
+
+  <!-- ── CONTROLS ──────────────────────────────────── -->
+  <div class="controls">
+    <div class="filters" id="catBtns">
+      <button class="cat-btn active" data-cat="all">All</button>
+      <button class="cat-btn" data-cat="tailor">Tailor</button>
+      <button class="cat-btn" data-cat="cobbler">Mochi</button>
+      <button class="cat-btn" data-cat="dry">Dry Clean</button>
+      <button class="cat-btn" data-cat="rafu">Rafu</button>
+      <button class="cat-btn" data-cat="dyer">Dyer</button>
+      <select id="cityFilter" aria-label="Filter by city">
+        <option value="all">All Cities</option>
+      </select>
+    </div>
+    <a href="https://forms.gle/6yPvg3QR54nCB1og7"
+       target="_blank"
+       rel="noopener noreferrer"
+       class="add-btn">+ Add Business</a>
+  </div>
+
+  <!-- ── SEARCH ─────────────────────────────────────── -->
+  <div class="search-wrap">
+    <input type="text"
+           id="searchInput"
+           placeholder="Search by name, city or service…"
+           autocomplete="off"
+           spellcheck="false"
+           aria-label="Search directory">
+  </div>
+
+  <!-- ── STATUS / LOADING ───────────────────────────── -->
+  <div id="statusMsg" role="status" aria-live="polite">Loading directory data…</div>
+
+  <!-- ── RESULT COUNT ───────────────────────────────── -->
+  <div id="resultCount"></div>
+
+  <!-- ── DIRECTORY ──────────────────────────────────── -->
+  <div id="directory" aria-label="Business directory">
+
+    <div class="cat-block" id="blockTailor">
+      <span class="cat-heading">Tailors</span>
+      <div id="listTailor"></div>
+    </div>
+
+    <div class="cat-block" id="blockCobbler">
+      <span class="cat-heading">Mochi / Cobblers</span>
+      <div id="listCobbler"></div>
+    </div>
+
+    <div class="cat-block" id="blockCleaner">
+      <span class="cat-heading">Dry Clean &amp; Rafu</span>
+      <div id="listCleaner"></div>
+    </div>
+
+    <div class="cat-block" id="blockDyer">
+      <span class="cat-heading">Dyers</span>
+      <div id="listDyer"></div>
+    </div>
+
+  </div>
+
+  <!-- ── FOOTER ─────────────────────────────────────── -->
+  <footer class="footer">
+    <span>© Feat Artist</span>
+    <span>Community-built · Not-for-profit</span>
+  </footer>
+
+</div><!-- /.page -->
+
+<!-- ── MODAL ──────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalBizName">
+  <div class="modal-card">
+    <button class="modal-close" id="modalCloseBtn" aria-label="Close">× Close [Esc]</button>
+    <div class="modal-header">
+      <div class="modal-biz-name" id="modalBizName"></div>
+      <span class="modal-cat-badge" id="modalCat"></span>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   FEAT. PAGES — Directory JS
+   ═══════════════════════════════════════════════════ */
+
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+
+/* ── State ── */
+let DATA = [];
+let activeCat  = "all";
+let activeCity = "all";
+
+/* ── Column name map — matches YOUR Google Sheet headers ── */
+const COL = {
+  name:     "Business Name",
+  owner:    "Owner Name",
+  phone:    "Phone Number",
+  city:     "City",
+  category: "Category",
+  services: "Services Offered",   // ← your sheet uses "Services Offered"
+  address:  "Full Address",       // ← your sheet uses "Full Address"
+  status:   "status"
+};
+
+/* ── Category definitions ── */
+const CATS = [
+  { key: "tailor",  keywords: ["tailor"],           listId: "listTailor",  blockId: "blockTailor"  },
+  { key: "cobbler", keywords: ["cobbler", "mochi"],  listId: "listCobbler", blockId: "blockCobbler" },
+  { key: "dry",     keywords: ["dry", "rafu"],       listId: "listCleaner", blockId: "blockCleaner" },
+  { key: "rafu",    keywords: ["dry", "rafu"],       listId: "listCleaner", blockId: "blockCleaner" },
+  { key: "dyer",    keywords: ["dyer"],              listId: "listDyer",    blockId: "blockDyer"    },
+];
+
+/* Deduplicated render groups (rafu + dry share same block) */
+const RENDER_GROUPS = [
+  { cats: ["tailor"],            keywords: ["tailor"],          listId: "listTailor",  blockId: "blockTailor"  },
+  { cats: ["cobbler"],           keywords: ["cobbler","mochi"], listId: "listCobbler", blockId: "blockCobbler" },
+  { cats: ["dry","rafu"],        keywords: ["dry","rafu"],      listId: "listCleaner", blockId: "blockCleaner" },
+  { cats: ["dyer"],              keywords: ["dyer"],            listId: "listDyer",    blockId: "blockDyer"    },
+];
+
+/* ── Helpers ── */
+function esc(str) {
+  if (str == null) return "";
+  return String(str).replace(/[&<>'"]/g, c =>
+    ({ "&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;" }[c]));
+}
+
+function catOf(item) {
+  return (item[COL.category] || "").toLowerCase();
+}
+
+function matchesCat(item, keywords) {
+  const c = catOf(item);
+  return keywords.some(kw => c.includes(kw));
+}
+
+function cityOf(item) {
+  return (item[COL.city] || "").toLowerCase().trim();
+}
+
+/* ── Fetch ── */
+fetch(APPS_SCRIPT_URL)
+  .then(r => {
+    if (!r.ok) throw new Error("Network response was not ok");
+    return r.json();
+  })
+  .then(raw => {
+    DATA = Array.isArray(raw)
+      ? raw.filter(d => (d[COL.status] || "").trim().toLowerCase() === "approved")
+      : [];
+    buildCityDropdown();
+    render();
+  })
+  .catch(err => {
+    console.error("Fetch error:", err);
+    const s = document.getElementById("statusMsg");
+    s.textContent = "Error loading data. Please refresh and try again.";
+    s.classList.add("error");
+  });
+
+/* ── Build city dropdown ── */
+function buildCityDropdown() {
+  const cities = [...new Set(
+    DATA.map(d => (d[COL.city] || "").trim()).filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b));
+
+  const sel = document.getElementById("cityFilter");
+  cities.forEach(city => {
+    const opt = document.createElement("option");
+    opt.value = city.toLowerCase();
+    opt.textContent = city.charAt(0).toUpperCase() + city.slice(1).toLowerCase();
+    sel.appendChild(opt);
+  });
+}
+
+/* ── Render ── */
+function render() {
+  let totalShown = 0;
+
+  RENDER_GROUPS.forEach(group => {
+    /* Does the active category filter include this group? */
+    const catOk = activeCat === "all" || group.cats.includes(activeCat);
+
+    const items = catOk
+      ? DATA.filter(d =>
+          matchesCat(d, group.keywords) &&
+          (activeCity === "all" || cityOf(d) === activeCity)
+        )
+      : [];
+
+    totalShown += items.length;
+
+    document.getElementById(group.listId).innerHTML =
+      items.map((d, i) => createCard(d, DATA.indexOf(d))).join("");
+
+    document.getElementById(group.blockId).style.display =
+      items.length ? "block" : "none";
+  });
+
+  const statusEl  = document.getElementById("statusMsg");
+  const countEl   = document.getElementById("resultCount");
+  const dirEl     = document.getElementById("directory");
+
+  if (totalShown === 0) {
+    statusEl.textContent = "No results found. Be the first to add one!";
+    statusEl.className   = "";
+    statusEl.style.display = "block";
+    dirEl.style.display    = "none";
+    countEl.style.display  = "none";
+  } else {
+    statusEl.style.display = "none";
+    dirEl.style.display    = "block";
+    countEl.style.display  = "block";
+    countEl.textContent    = `${totalShown} listing${totalShown !== 1 ? "s" : ""} found`;
+  }
+}
+
+/* ── Create listing card HTML ── */
+function createCard(d, idx) {
+  const services = (d[COL.services] || "").trim();
+  const truncSvc = services.length > 40 ? services.slice(0, 40) + "…" : services;
+
+  return `<div class="listing" data-idx="${idx}" role="button" tabindex="0"
+               aria-label="View details for ${esc(d[COL.name])}">
+    <div class="l-name">${esc(d[COL.name])}</div>
+    <div class="l-city">${esc(d[COL.city])}</div>
+    <span class="l-phone">${esc(d[COL.phone])}</span>
+    ${truncSvc ? `<div class="l-services">${esc(truncSvc)}</div>` : ""}
+  </div>`;
+}
+
+/* ── Filter by search ── */
+function applySearch() {
+  const q = document.getElementById("searchInput").value.toUpperCase().trim();
+
+  /* Re-render from data first (resets any previous search hide) */
+  render();
+  if (!q) return;
+
+  let totalVisible = 0;
+
+  RENDER_GROUPS.forEach(group => {
+    const block = document.getElementById(group.blockId);
+    if (block.style.display === "none") return;
+
+    const cards = block.querySelectorAll(".listing");
+    let visibleInBlock = 0;
+
+    cards.forEach(card => {
+      const match = card.textContent.toUpperCase().includes(q);
+      card.style.display = match ? "" : "none";
+      if (match) visibleInBlock++;
+    });
+
+    /* Hide entire block (incl. header) if nothing matches */
+    block.style.display = visibleInBlock ? "block" : "none";
+    totalVisible += visibleInBlock;
+  });
+
+  const statusEl = document.getElementById("statusMsg");
+  const countEl  = document.getElementById("resultCount");
+  const dirEl    = document.getElementById("directory");
+
+  if (totalVisible === 0) {
+    statusEl.textContent   = `No matches for "${document.getElementById("searchInput").value}".`;
+    statusEl.style.display = "block";
+    dirEl.style.display    = "none";
+    countEl.style.display  = "none";
+  } else {
+    countEl.textContent = `${totalVisible} match${totalVisible !== 1 ? "es" : ""} found`;
+  }
+}
+
+/* ── Open modal ── */
+function openModal(idx) {
+  const d = DATA[idx];
+  if (!d) return;
+
+  document.getElementById("modalBizName").textContent = d[COL.name] || "—";
+  document.getElementById("modalCat").textContent     = d[COL.category] || "";
+
+  const phone    = esc(d[COL.phone]   || "N/A");
+  const owner    = esc(d[COL.owner]   || "N/A");
+  const city     = esc(d[COL.city]    || "N/A");
+  const address  = esc(d[COL.address] || "N/A");
+  const services = esc(d[COL.services]|| "");
+
+  document.getElementById("modalBody").innerHTML = `
+    <div class="modal-field">
+      <span class="modal-field-label">Owner / Contact</span>
+      <span class="modal-field-val">${owner}</span>
+    </div>
+    <div class="modal-field">
+      <span class="modal-field-label">City</span>
+      <span class="modal-field-val">${city}</span>
+    </div>
+    <div class="modal-field">
+      <span class="modal-field-label">Full Address</span>
+      <span class="modal-field-val">${address}</span>
+    </div>
+    ${services ? `
+    <div class="modal-field">
+      <span class="modal-field-label">Services Offered</span>
+      <div class="modal-field-val modal-services-val">${services}</div>
+    </div>` : ""}
+    <div class="modal-phone-row">
+      <span class="modal-phone-num">${phone}</span>
+      <a class="modal-call-btn" href="tel:${esc(d[COL.phone] || "")}">Call ↗</a>
+    </div>
+  `;
+
+  document.getElementById("modal").classList.add("open");
+  document.getElementById("modalCloseBtn").focus();
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+}
+
+/* ── Event wiring ── */
+
+/* Category buttons — scoped to #catBtns only */
+document.getElementById("catBtns").addEventListener("click", e => {
+  const btn = e.target.closest("[data-cat]");
+  if (!btn) return;
+  activeCat = btn.dataset.cat;
+  document.querySelectorAll("#catBtns [data-cat]")
+    .forEach(b => b.classList.toggle("active", b === btn));
+  document.getElementById("searchInput").value = "";
+  render();
+});
+
+/* City filter */
+document.getElementById("cityFilter").addEventListener("change", function () {
+  activeCity = this.value;
+  document.getElementById("searchInput").value = "";
+  render();
+});
+
+/* Search */
+document.getElementById("searchInput").addEventListener("input", applySearch);
+
+/* Listing clicks — event delegation on directory */
+document.getElementById("directory").addEventListener("click", e => {
+  const card = e.target.closest(".listing");
+  if (card) openModal(parseInt(card.dataset.idx, 10));
+});
+
+/* Keyboard: Enter on listing card */
+document.getElementById("directory").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    const card = e.target.closest(".listing");
+    if (card) openModal(parseInt(card.dataset.idx, 10));
+  }
+});
+
+/* Modal close */
+document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+document.getElementById("modal").addEventListener("click", e => {
+  if (e.target === document.getElementById("modal")) closeModal();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+</script>
+
+</body>
+</html>
