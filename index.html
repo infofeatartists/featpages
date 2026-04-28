@@ -677,7 +677,7 @@ let activeCity = "all";
 const COL = {
   name:     "Business Name",
   owner:    "Owner Name",
-  phone:    "Phone Number",
+  phone:    "Phone Number ",
   city:     "City",
   category: "Category",
   services: "Services Offered",
@@ -847,6 +847,7 @@ function applySearch() {
 }
  
 /* ── Open modal ── */
+/* ── Open modal ── */
 function openModal(idx) {
   const d = DATA[idx];
   if (!d) return;
@@ -854,17 +855,19 @@ function openModal(idx) {
   document.getElementById("modalBizName").textContent = d[COL.name] || "—";
   document.getElementById("modalCat").textContent     = d[COL.category] || "";
  
-  const phone    = d[COL.phone]   || "";
+  // Added "N/A" fallback for phone just like the other fields
+  const phone    = esc(d[COL.phone]   || "N/A"); 
   const owner    = esc(d[COL.owner]   || "N/A");
   const city     = esc(d[COL.city]    || "N/A");
   const address  = esc(d[COL.address] || "N/A");
   const services = esc(d[COL.services]|| "");
   const notes    = esc(d[COL.notes]   || "");
  
-  const callLabel = phone ? `Call ${esc(phone)} ↗` : "Call ↗";
-  const callHref  = phone ? `tel:${esc(phone)}` : "#";
- 
   document.getElementById("modalBody").innerHTML = `
+    <div class="modal-field">
+      <span class="modal-field-label">Phone Number</span>
+      <span class="modal-field-val">${phone}</span>
+    </div>
     <div class="modal-field">
       <span class="modal-field-label">Owner / Contact</span>
       <span class="modal-field-val">${owner}</span>
@@ -887,14 +890,12 @@ function openModal(idx) {
       <span class="modal-field-label">Additional Note on Service Provided</span>
       <div class="modal-field-val modal-notes-val">${notes}</div>
     </div>` : ""}
-    <div class="modal-phone-row">
-      <a class="modal-call-btn" href="${callHref}">${callLabel}</a>
-    </div>
   `;
  
   document.getElementById("modal").classList.add("open");
   document.getElementById("modalCloseBtn").focus();
 }
+ 
  
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
