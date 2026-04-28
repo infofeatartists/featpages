@@ -756,8 +756,10 @@ function cityOf(item) {
 function getImageUrl(url) {
   if (!url) return "";
   const match = url.match(/[-\w]{25,}/);
-  return match
-    ? `https://drive.google.com/thumbnail?id=${match[0]}&sz=w800`
+  
+  //  Using Google's dedicated Image Hosting CDN (lh3.googleusercontent.com)
+  return match 
+    ? `https://lh3.googleusercontent.com/d/${match[0]}`
     : "";
 }
 
