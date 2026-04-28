@@ -449,7 +449,6 @@ body {
   font-family: 'Rajdhani', sans-serif;
 }
  
-/* Notes field styled the same as services */
 .modal-notes-val {
   background: rgba(0,0,0,0.07);
   padding: 8px 10px;
@@ -533,80 +532,51 @@ body {
   text-transform: uppercase;
   margin-top: 2px;
 }
-  .modal-flex {
 
+.modal-flex {
   display: flex;
-
   gap: 20px;
-
   align-items: flex-start;
-
 }
 
 .modal-left {
-
   flex: 1;
-
 }
 
 .modal-right {
-
   width: 180px;
-
 }
 
 .modal-img {
-
   width: 100%;
-
   height: 180px;
-
   object-fit: cover;
-
   border: 2px solid #1a1a1a;
-
 }
 
 .no-img {
-
   width: 100%;
-
   height: 180px;
-
   display: flex;
-
   align-items: center;
-
   justify-content: center;
-
   border: 2px dashed #aaa;
-
   font-size: 12px;
-
   color: #777;
-
 }
 
 @media (max-width: 600px) {
-
   .modal-flex {
-
     flex-direction: column;
-
   }
 
   .modal-right {
-
     width: 100%;
-
   }
 
   .modal-img {
-
     height: 200px;
-
   }
-
 }
 </style>
 </head>
@@ -702,24 +672,15 @@ body {
  
   <!-- ── FOOTER ─────────────────────────────────────── -->
   <footer class="footer">
-
-  <!-- LEFT: ONLY LOGO -->
-
-  <div class="footer-logo">
-
-    <div class="footer-logo-main">
-
-      <img src="index2html.png" alt="Feat Logo">
-
+    <!-- LEFT: ONLY LOGO -->
+    <div class="footer-logo">
+      <div class="footer-logo-main">
+        <img src="index2html.png" alt="Feat Logo">
+      </div>
     </div>
-
-  </div>
-
-  <!-- RIGHT: TEXT -->
-
-  <span>Community-built · Not-for-profit</span>
-
-</footer>
+    <!-- RIGHT: TEXT -->
+    <span>Community-built · Not-for-profit</span>
+  </footer>
 
 </div><!-- /.page -->
  
@@ -741,7 +702,7 @@ body {
    ═══════════════════════════════════════════════════ */
  
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+  "https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnSW6RfH_Su50hZKk7-rkIrmp8BIzrE-Uy7j8OIMvgI_DubGHjagajR166KEqP7pZXGKnYtZUR0gZ9Dq7JkPFEMOF9IY1pG5o3bAxSWQuFDqI8iVaWnbT--5Dclo8ry-oD7m_Gjhd2NtWiCQ33Mg55bbz5ww49YmxYDImvRK8LolelpBhIEnBPC4s0JRCdM7DAYOVyVoIy-e6GB_AWXifUXcZDmquAvvKrfPv2yuW86Le0x_cyVasY5Qq-azazCjy60jVz1NmOjmU4Ggy7I0Ui9VyK8Hww&lib=MQvH1oNXORlSfTL6bZy6g8qVbd-sMNuMy";
  
 /* ── State ── */
 let DATA = [];
@@ -758,8 +719,8 @@ const COL = {
   services: "Services Offered",
   address:  "Full Address",
   notes:    "Additional note on service provided",
-  status:   "status"
-  image:     "Business Image"
+  status:   "status",
+  image:    "Business Image"
 };
  
 /* ── Category definitions ── */
@@ -791,19 +752,15 @@ function matchesCat(item, keywords) {
 function cityOf(item) {
   return (item[COL.city] || "").toLowerCase().trim();
 }
- function getImageUrl(url) {
 
+function getImageUrl(url) {
   if (!url) return "";
-
   const match = url.match(/[-\w]{25,}/);
-
-  return match 
-
+  return match
     ? `https://drive.google.com/uc?export=view&id=${match[0]}`
-
     : "";
-
 }
+
 /* ── Fetch ── */
 fetch(APPS_SCRIPT_URL)
   .then(r => {
@@ -935,117 +892,64 @@ function applySearch() {
 }
  
 /* ── Open modal ── */
-/* ── Open modal ── */
 function openModal(idx) {
-
   const d = DATA[idx];
-
   if (!d) return;
 
   document.getElementById("modalBizName").textContent = d[COL.name] || "—";
-
   document.getElementById("modalCat").textContent     = d[COL.category] || "";
 
-  const phone    = esc(d[COL.phone]   || "N/A"); 
-
-  const owner    = esc(d[COL.owner]   || "N/A");
-
-  const city     = esc(d[COL.city]    || "N/A");
-
-  const address  = esc(d[COL.address] || "N/A");
-
-  const services = esc(d[COL.services]|| "");
-
-  const notes    = esc(d[COL.notes]   || "");
-
-  // 🔥 IMAGE LOGIC
+  const phone    = esc(d[COL.phone]    || "N/A");
+  const owner    = esc(d[COL.owner]    || "N/A");
+  const city     = esc(d[COL.city]     || "N/A");
+  const address  = esc(d[COL.address]  || "N/A");
+  const services = esc(d[COL.services] || "");
+  const notes    = esc(d[COL.notes]    || "");
 
   const imageUrl = getImageUrl(d[COL.image]);
-
-  const image = imageUrl
-
-    ? `<img src="${imageUrl}" class="modal-img">`
-
+  const imgHtml  = imageUrl
+    ? `<img src="${imageUrl}" class="modal-img" alt="Business photo">`
     : `<div class="no-img">No Image</div>`;
 
   document.getElementById("modalBody").innerHTML = `
-
     <div class="modal-flex">
-
-      <!-- LEFT SIDE -->
-
       <div class="modal-left">
-
         <div class="modal-field">
-
           <span class="modal-field-label">Phone Number</span>
-
           <span class="modal-field-val">${phone}</span>
-
         </div>
-
         <div class="modal-field">
-
           <span class="modal-field-label">Owner / Contact</span>
-
           <span class="modal-field-val">${owner}</span>
-
         </div>
-
         <div class="modal-field">
-
           <span class="modal-field-label">City</span>
-
           <span class="modal-field-val">${city}</span>
-
         </div>
-
         <div class="modal-field">
-
           <span class="modal-field-label">Full Address</span>
-
           <span class="modal-field-val">${address}</span>
-
         </div>
-
         ${services ? `
-
         <div class="modal-field">
-
           <span class="modal-field-label">Services Offered</span>
-
           <div class="modal-field-val modal-services-val">${services}</div>
-
         </div>` : ""}
-
         ${notes ? `
-
         <div class="modal-field">
-
           <span class="modal-field-label">Additional Note</span>
-
           <div class="modal-field-val modal-notes-val">${notes}</div>
-
         </div>` : ""}
-
       </div>
-
-      <!-- RIGHT SIDE IMAGE -->
-
       <div class="modal-right">
-
-        ${image}
-
+        ${imgHtml}
       </div>
-
     </div>
-
   `;
 
   document.getElementById("modal").classList.add("open");
-
 }
- 
+
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
 }
