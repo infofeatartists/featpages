@@ -8,7 +8,7 @@
 <style>
 /* ─── TOKENS ─────────────────────────────────────────────────── */
 :root {
-  --yellow: #fcdb05;
+  --yellow: #ffffff;
   --black:  #1a1a1a;
   --faint:  #555;
   --white:  #ffffff;
@@ -96,11 +96,12 @@ body {
  
 .brand-sub {
   font-family: 'Space Mono', monospace;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 2px;
   color: var(--faint);
+  transform: translateX(-5px);
 }
  
 .masthead-tagline {
@@ -937,6 +938,5 @@ document.getElementById("modal").addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 </script>
-</body>
 </body>
 </html>
