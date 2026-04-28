@@ -757,7 +757,7 @@ function getImageUrl(url) {
   if (!url) return "";
   const match = url.match(/[-\w]{25,}/);
   return match
-    ? `https://drive.google.com/uc?export=view&id=${match[0]}`
+    ? `https://drive.google.com/thumbnail?id=${match[0]}&sz=w800`
     : "";
 }
 
