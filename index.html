@@ -24,7 +24,6 @@ body {
   padding: 24px 16px 48px;
   min-height: 100vh;
 }
-/* ── Plain white page, no grid ── */
 .page {
   background: #ffffff;
   width: 100%;
@@ -205,13 +204,19 @@ body {
 .modal-left { flex: 1; }
 .modal-right { width: 180px; }
 .modal-img { width: 100%; max-width: 100%; height: auto; max-height: 220px; object-fit: contain; border: 2px solid #1a1a1a; display: block; }
+.no-img {
+  width: 100%; height: 120px; background: rgba(0,0,0,0.06);
+  border: 2px dashed rgba(0,0,0,0.2); display: flex;
+  align-items: center; justify-content: center;
+  font-family: 'Space Mono', monospace; font-size: 11px;
+  color: rgba(0,0,0,0.3); text-transform: uppercase; letter-spacing: 1px;
+}
 @media (max-width: 600px) {
   .modal-flex { flex-direction: column; }
   .modal-right { width: 100%; }
   .modal-img { height: 200px; }
 }
 
-/* ── FOOTER: Teko font, black color ── */
 .footer {
   margin-top: 48px;
   border-top: 2px solid var(--black);
@@ -248,7 +253,7 @@ body {
       <span class="brand-sub">India Repair Directory</span>
     </div>
     <div class="masthead-tagline">
-      Repair. Reuse. Respect the craft. — Submit your local repair- profession below.
+      Repair. Reuse. Respect the craft. — Submit your local repair profession below.
     </div>
   </header>
 
@@ -309,13 +314,16 @@ body {
 
 <script>
 const APPS_SCRIPT_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnSW6RfH_Su50hZKk7-rkIrmp8BIzrE-Uy7j8OIMvgI_DubGHjagajR166KEqP7pZXGKnYtZUR0gZ9Dq7JkPFEMOF9IY1pG5o3bAxSWQuFDqI8iVaWnbT--5Dclo8ry-oD7m_Gjhd2NtWiCQ33Mg55bbz5ww49YmxYDImvRK8LolelpBhIEnBPC4s0JRCdM7DAYOVyVoIy-e6GB_AWXifUXcZDmquAvvKrfPv2yuW86Le0x_cyVasY5Qq-azazCjy60jVz1NmOjmU4Ggy7I0Ui9VyK8Hww&lib=MQvH1oNXORlSfTL6bZy6g8qVbd-sMNuMy";
+
 let DATA = [], activeCat = "all", activeCity = "all";
+
 const COL = {
   name:"Business Name", owner:"Owner Name", phone:"Phone Number ",
   city:"City", category:"Category", services:"Services Offered",
   address:"Full Address", notes:"Additional note on service provided",
   status:"status", image:"Business Image"
 };
+
 const RENDER_GROUPS = [
   { cats:["tailor"],       keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor"  },
   { cats:["cobbler"],      keywords:["cobbler","mochi"], listId:"listCobbler", blockId:"blockCobbler" },
@@ -324,37 +332,67 @@ const RENDER_GROUPS = [
   { cats:["scrap"],        keywords:["scrap"],           listId:"listScrap",   blockId:"blockScrap"   },
   { cats:["other"],        keywords:["other"],           listId:"listOther",   blockId:"blockOther"   },
 ];
+
 function esc(s){ if(s==null)return""; return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 function catOf(d){ return(d[COL.category]||"").toLowerCase(); }
 function matchesCat(d,kws){ const c=catOf(d); return kws.some(k=>c.includes(k)); }
 function cityOf(d){ return(d[COL.city]||"").toLowerCase().trim(); }
-function getImageUrl(url){ if(!url)return""; const m=url.match(/[-\w]{25,}/); return m?`https://lh3.googleusercontent.com/d/${m[0]}`:""; }
+
+/* ── FIXED: use drive.google.com/thumbnail which is the current stable endpoint ── */
+function getImageUrl(url) {
+  if (!url) return "";
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) return "";
+  const id = m[0];
+  return `https://drive.google.com/thumbnail?id=${id}&sz=w400`;
+}
 
 fetch(APPS_SCRIPT_URL)
   .then(r=>{ if(!r.ok)throw new Error("Network error"); return r.json(); })
-  .then(raw=>{ DATA=Array.isArray(raw)?raw.filter(d=>(d[COL.status]||"").trim().toLowerCase()==="approved"):[]; buildCityDropdown(); render(); })
-  .catch(err=>{ const s=document.getElementById("statusMsg"); s.textContent="Error loading data. Please refresh and try again."; s.classList.add("error"); });
+  .then(raw=>{
+    DATA = Array.isArray(raw) ? raw.filter(d=>(d[COL.status]||"").trim().toLowerCase()==="approved") : [];
+    buildCityDropdown();
+    render();
+  })
+  .catch(err=>{
+    const s = document.getElementById("statusMsg");
+    s.textContent = "Error loading data. Please refresh and try again.";
+    s.classList.add("error");
+  });
 
 function buildCityDropdown(){
-  const cities=[...new Set(DATA.map(d=>(d[COL.city]||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-  const sel=document.getElementById("cityFilter");
-  cities.forEach(city=>{ const o=document.createElement("option"); o.value=city.toLowerCase(); o.textContent=city.charAt(0).toUpperCase()+city.slice(1).toLowerCase(); sel.appendChild(o); });
-}
-function render(){
-  let total=0;
-  RENDER_GROUPS.forEach(g=>{
-    const ok=activeCat==="all"||g.cats.includes(activeCat);
-    const items=ok?DATA.filter(d=>matchesCat(d,g.keywords)&&(activeCity==="all"||cityOf(d)===activeCity)):[];
-    total+=items.length;
-    document.getElementById(g.listId).innerHTML=items.map(d=>createCard(d,DATA.indexOf(d))).join("");
-    document.getElementById(g.blockId).style.display=items.length?"block":"none";
+  const cities = [...new Set(DATA.map(d=>(d[COL.city]||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const sel = document.getElementById("cityFilter");
+  cities.forEach(city=>{
+    const o = document.createElement("option");
+    o.value = city.toLowerCase();
+    o.textContent = city.charAt(0).toUpperCase() + city.slice(1).toLowerCase();
+    sel.appendChild(o);
   });
-  const s=document.getElementById("statusMsg"), c=document.getElementById("resultCount"), dir=document.getElementById("directory");
-  if(total===0){ s.textContent="No results found. Be the first to add one!"; s.className=""; s.style.display="block"; dir.style.display="none"; c.style.display="none"; }
-  else{ s.style.display="none"; dir.style.display="block"; c.style.display="block"; c.textContent=`${total} listing${total!==1?"s":""} found`; }
 }
-function createCard(d,idx){
-  const svc=(d[COL.services]||"").trim(), t=svc.length>40?svc.slice(0,40)+"…":svc;
+
+function render(){
+  let total = 0;
+  RENDER_GROUPS.forEach(g=>{
+    const ok = activeCat==="all" || g.cats.includes(activeCat);
+    const items = ok ? DATA.filter(d=>matchesCat(d,g.keywords) && (activeCity==="all" || cityOf(d)===activeCity)) : [];
+    total += items.length;
+    document.getElementById(g.listId).innerHTML = items.map(d=>createCard(d, DATA.indexOf(d))).join("");
+    document.getElementById(g.blockId).style.display = items.length ? "block" : "none";
+  });
+  const s = document.getElementById("statusMsg"), c = document.getElementById("resultCount"), dir = document.getElementById("directory");
+  if(total===0){
+    s.textContent = "No results found. Be the first to add one!";
+    s.className = ""; s.style.display = "block";
+    dir.style.display = "none"; c.style.display = "none";
+  } else {
+    s.style.display = "none"; dir.style.display = "block";
+    c.style.display = "block"; c.textContent = `${total} listing${total!==1?"s":""} found`;
+  }
+}
+
+function createCard(d, idx){
+  const svc = (d[COL.services]||"").trim(), t = svc.length>40 ? svc.slice(0,40)+"…" : svc;
   return `<div class="listing" data-idx="${idx}" role="button" tabindex="0" aria-label="View details for ${esc(d[COL.name])}">
     <div class="l-name">${esc(d[COL.name])}</div>
     <div class="l-city">${esc(d[COL.city])}</div>
@@ -362,30 +400,48 @@ function createCard(d,idx){
     ${t?`<div class="l-services">${esc(t)}</div>`:""}
   </div>`;
 }
+
 function applySearch(){
-  const q=document.getElementById("searchInput").value.toUpperCase().trim();
-  render(); if(!q)return;
-  let total=0;
+  const q = document.getElementById("searchInput").value.toUpperCase().trim();
+  render();
+  if(!q) return;
+  let total = 0;
   RENDER_GROUPS.forEach(g=>{
-    const block=document.getElementById(g.blockId);
-    if(block.style.display==="none")return;
-    let vis=0;
-    block.querySelectorAll(".listing").forEach(card=>{ const m=card.textContent.toUpperCase().includes(q); card.style.display=m?"":"none"; if(m)vis++; });
-    block.style.display=vis?"block":"none"; total+=vis;
+    const block = document.getElementById(g.blockId);
+    if(block.style.display==="none") return;
+    let vis = 0;
+    block.querySelectorAll(".listing").forEach(card=>{
+      const m = card.textContent.toUpperCase().includes(q);
+      card.style.display = m ? "" : "none";
+      if(m) vis++;
+    });
+    block.style.display = vis ? "block" : "none";
+    total += vis;
   });
-  const s=document.getElementById("statusMsg"), c=document.getElementById("resultCount"), dir=document.getElementById("directory");
-  if(total===0){ s.textContent=`No matches for "${document.getElementById("searchInput").value}".`; s.style.display="block"; dir.style.display="none"; c.style.display="none"; }
-  else{ c.textContent=`${total} match${total!==1?"es":""} found`; }
+  const s = document.getElementById("statusMsg"), c = document.getElementById("resultCount"), dir = document.getElementById("directory");
+  if(total===0){
+    s.textContent = `No matches for "${document.getElementById("searchInput").value}".`;
+    s.style.display = "block"; dir.style.display = "none"; c.style.display = "none";
+  } else {
+    c.textContent = `${total} match${total!==1?"es":""} found`;
+  }
 }
+
 function openModal(idx){
-  const d=DATA[idx]; if(!d)return;
-  document.getElementById("modalBizName").textContent=d[COL.name]||"—";
-  document.getElementById("modalCat").textContent=d[COL.category]||"";
-  const phone=esc(d[COL.phone]||"N/A"), owner=esc(d[COL.owner]||"N/A"), city=esc(d[COL.city]||"N/A"),
-        address=esc(d[COL.address]||"N/A"), services=esc(d[COL.services]||""), notes=esc(d[COL.notes]||"");
-  const imgUrl=getImageUrl(d[COL.image]);
-  const imgHtml=imgUrl?`<img src="${imgUrl}" class="modal-img" alt="Business photo">`:`<div class="no-img">No Image</div>`;
-  document.getElementById("modalBody").innerHTML=`
+  const d = DATA[idx]; if(!d) return;
+  document.getElementById("modalBizName").textContent = d[COL.name] || "—";
+  document.getElementById("modalCat").textContent = d[COL.category] || "";
+  const phone   = esc(d[COL.phone]   || "N/A");
+  const owner   = esc(d[COL.owner]   || "N/A");
+  const city    = esc(d[COL.city]    || "N/A");
+  const address = esc(d[COL.address] || "N/A");
+  const services = esc(d[COL.services] || "");
+  const notes   = esc(d[COL.notes]   || "");
+  const imgUrl  = getImageUrl(d[COL.image]);
+  const imgHtml = imgUrl
+    ? `<img src="${imgUrl}" class="modal-img" alt="Business photo" onerror="this.outerHTML='<div class=\'no-img\'>No Image</div>'">`
+    : `<div class="no-img">No Image</div>`;
+  document.getElementById("modalBody").innerHTML = `
     <div class="modal-flex">
       <div class="modal-left">
         <div class="modal-field"><span class="modal-field-label">Phone Number</span><span class="modal-field-val">${phone}</span></div>
@@ -399,16 +455,23 @@ function openModal(idx){
     </div>`;
   document.getElementById("modal").classList.add("open");
 }
+
 function closeModal(){ document.getElementById("modal").classList.remove("open"); }
 
-document.getElementById("catBtns").addEventListener("click",e=>{ const btn=e.target.closest("[data-cat]"); if(!btn)return; activeCat=btn.dataset.cat; document.querySelectorAll("#catBtns [data-cat]").forEach(b=>b.classList.toggle("active",b===btn)); document.getElementById("searchInput").value=""; render(); });
-document.getElementById("cityFilter").addEventListener("change",function(){ activeCity=this.value; document.getElementById("searchInput").value=""; render(); });
-document.getElementById("searchInput").addEventListener("input",applySearch);
-document.getElementById("directory").addEventListener("click",e=>{ const card=e.target.closest(".listing"); if(card)openModal(parseInt(card.dataset.idx,10)); });
-document.getElementById("directory").addEventListener("keydown",e=>{ if(e.key==="Enter"){ const card=e.target.closest(".listing"); if(card)openModal(parseInt(card.dataset.idx,10)); } });
-document.getElementById("modalCloseBtn").addEventListener("click",closeModal);
-document.getElementById("modal").addEventListener("click",e=>{ if(e.target===document.getElementById("modal"))closeModal(); });
-document.addEventListener("keydown",e=>{ if(e.key==="Escape")closeModal(); });
+document.getElementById("catBtns").addEventListener("click", e=>{
+  const btn = e.target.closest("[data-cat]"); if(!btn) return;
+  activeCat = btn.dataset.cat;
+  document.querySelectorAll("#catBtns [data-cat]").forEach(b=>b.classList.toggle("active", b===btn));
+  document.getElementById("searchInput").value = "";
+  render();
+});
+document.getElementById("cityFilter").addEventListener("change", function(){ activeCity = this.value; document.getElementById("searchInput").value = ""; render(); });
+document.getElementById("searchInput").addEventListener("input", applySearch);
+document.getElementById("directory").addEventListener("click", e=>{ const card = e.target.closest(".listing"); if(card) openModal(parseInt(card.dataset.idx, 10)); });
+document.getElementById("directory").addEventListener("keydown", e=>{ if(e.key==="Enter"){ const card = e.target.closest(".listing"); if(card) openModal(parseInt(card.dataset.idx, 10)); } });
+document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+document.getElementById("modal").addEventListener("click", e=>{ if(e.target===document.getElementById("modal")) closeModal(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
 </script>
 </body>
 </html>
