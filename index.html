@@ -94,24 +94,26 @@ body {
   filter: contrast(1.1);
 }
  
+/* ── CHANGED: India Repair Directory → black + Teko ── */
 .brand-sub {
-  font-family: 'Space Mono', monospace;
-  font-size: 14px;
-  font-weight: 700;
+  font-family: 'Teko', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: var(--faint);
+  color: var(--black);
   transform: translateX(-5px);
 }
  
+/* ── CHANGED: tagline → black + Teko ── */
 .masthead-tagline {
   margin-top: 10px;
-  font-family: 'Space Mono', monospace;
-  font-size: 12px;
-  font-weight: 700;
+  font-family: 'Teko', sans-serif;
+  font-size: 16px;
+  font-weight: 500;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--black);
   border-top: 1px solid rgba(0,0,0,0.15);
   padding-top: 8px;
   text-align: center;
@@ -313,11 +315,12 @@ body {
   letter-spacing: 0.5px;
 }
  
+/* ── CHANGED: city label → black + Teko ── */
 .l-city {
-  font-family: 'Space Mono', monospace;
-  font-size: 11px;
+  font-family: 'Teko', sans-serif;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--faint);
+  color: var(--black);
   text-transform: uppercase;
   margin-top: 1px;
 }
@@ -332,10 +335,12 @@ body {
   letter-spacing: 0.5px;
 }
  
+/* ── CHANGED: services text → black + Teko ── */
 .l-services {
-  font-family: 'Space Mono', monospace;
-  font-size: 11px;
-  color: var(--faint);
+  font-family: 'Teko', sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--black);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -559,7 +564,7 @@ body {
   max-width: 100%;
   height: auto;
   max-height: 220px;
-  object-fit: contain; /* Keeps the whole image visible without cropping */
+  object-fit: contain;
   border: 2px solid #1a1a1a;
   display: block;
 }
@@ -671,13 +676,11 @@ body {
  
   <!-- ── FOOTER ─────────────────────────────────────── -->
   <footer class="footer">
-    <!-- LEFT: ONLY LOGO -->
     <div class="footer-logo">
       <div class="footer-logo-main">
         <img src="index2html.png" alt="Feat Logo">
       </div>
     </div>
-    <!-- RIGHT: TEXT -->
     <span>Community-built · Not-for-profit</span>
   </footer>
 
@@ -696,19 +699,13 @@ body {
 </div>
  
 <script>
-/* ═══════════════════════════════════════════════════
-   FEAT. PAGES — Directory JS
-   ═══════════════════════════════════════════════════ */
- 
 const APPS_SCRIPT_URL =
   "https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnSW6RfH_Su50hZKk7-rkIrmp8BIzrE-Uy7j8OIMvgI_DubGHjagajR166KEqP7pZXGKnYtZUR0gZ9Dq7JkPFEMOF9IY1pG5o3bAxSWQuFDqI8iVaWnbT--5Dclo8ry-oD7m_Gjhd2NtWiCQ33Mg55bbz5ww49YmxYDImvRK8LolelpBhIEnBPC4s0JRCdM7DAYOVyVoIy-e6GB_AWXifUXcZDmquAvvKrfPv2yuW86Le0x_cyVasY5Qq-azazCjy60jVz1NmOjmU4Ggy7I0Ui9VyK8Hww&lib=MQvH1oNXORlSfTL6bZy6g8qVbd-sMNuMy";
  
-/* ── State ── */
 let DATA = [];
 let activeCat  = "all";
 let activeCity = "all";
  
-/* ── Column name map — matches YOUR Google Sheet headers ── */
 const COL = {
   name:     "Business Name",
   owner:    "Owner Name",
@@ -722,7 +719,6 @@ const COL = {
   image:    "Business Image"
 };
  
-/* ── Category definitions ── */
 const RENDER_GROUPS = [
   { cats: ["tailor"],            keywords: ["tailor"],          listId: "listTailor",  blockId: "blockTailor"  },
   { cats: ["cobbler"],           keywords: ["cobbler","mochi"], listId: "listCobbler", blockId: "blockCobbler" },
@@ -732,7 +728,6 @@ const RENDER_GROUPS = [
   { cats: ["other"],             keywords: ["other"],           listId: "listOther",   blockId: "blockOther"   },
 ];
  
-/* ── Helpers ── */
 function esc(str) {
   if (str == null) return "";
   return String(str).replace(/[&<>'"]/g, c =>
@@ -755,14 +750,11 @@ function cityOf(item) {
 function getImageUrl(url) {
   if (!url) return "";
   const match = url.match(/[-\w]{25,}/);
-  
-  //  Using Google's dedicated Image Hosting CDN (lh3.googleusercontent.com)
   return match 
     ? `https://lh3.googleusercontent.com/d/${match[0]}`
     : "";
 }
 
-/* ── Fetch ── */
 fetch(APPS_SCRIPT_URL)
   .then(r => {
     if (!r.ok) throw new Error("Network response was not ok");
@@ -782,7 +774,6 @@ fetch(APPS_SCRIPT_URL)
     s.classList.add("error");
   });
  
-/* ── Build city dropdown ── */
 function buildCityDropdown() {
   const cities = [...new Set(
     DATA.map(d => (d[COL.city] || "").trim()).filter(Boolean)
@@ -797,7 +788,6 @@ function buildCityDropdown() {
   });
 }
  
-/* ── Render ── */
 function render() {
   let totalShown = 0;
  
@@ -838,7 +828,6 @@ function render() {
   }
 }
  
-/* ── Create listing card HTML ── */
 function createCard(d, idx) {
   const services = (d[COL.services] || "").trim();
   const truncSvc = services.length > 40 ? services.slice(0, 40) + "…" : services;
@@ -852,7 +841,6 @@ function createCard(d, idx) {
   </div>`;
 }
  
-/* ── Filter by search ── */
 function applySearch() {
   const q = document.getElementById("searchInput").value.toUpperCase().trim();
  
@@ -892,7 +880,6 @@ function applySearch() {
   }
 }
  
-/* ── Open modal ── */
 function openModal(idx) {
   const d = DATA[idx];
   if (!d) return;
@@ -954,8 +941,6 @@ function openModal(idx) {
 function closeModal() {
   document.getElementById("modal").classList.remove("open");
 }
- 
-/* ── Event wiring ── */
  
 document.getElementById("catBtns").addEventListener("click", e => {
   const btn = e.target.closest("[data-cat]");
