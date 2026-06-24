@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://script.googleusercontent.com https://drive.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https://drive.google.com data:; script-src 'self' 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://script.googleusercontent.com https://script.google.com https://drive.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https://drive.google.com data:; script-src 'self' 'unsafe-inline' https://script.google.com https://script.googleusercontent.com;">
 <title>FEAT. PAGES — Repair Directory</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -263,7 +263,18 @@ body {
 }
 
 /* ── FOOTER ── */
-.footer {
+/* Load More */
+.load-more-wrap { text-align: center; margin-top: 20px; display: none; }
+.load-more-btn {
+  background: var(--black); color: var(--white);
+  border: 2px solid var(--black); padding: 10px 28px;
+  font-family: 'Teko', sans-serif; font-size: 18px; font-weight: 600;
+  text-transform: uppercase; cursor: pointer; letter-spacing: 1px;
+  transition: background 0.15s, color 0.15s;
+}
+.load-more-btn:hover { background: var(--white); color: var(--black); }
+.load-more-btn:focus-visible { outline: 3px solid #0066cc; outline-offset: 2px; }
+.load-more-btn:disabled { opacity: 0.4; cursor: default; }
   margin-top: 48px; border-top: 2px solid var(--black);
   padding-top: 10px; display: flex;
   justify-content: space-between; align-items: center;
@@ -329,6 +340,10 @@ body {
     <div class="cat-block" id="blockOther"><span class="cat-heading">Other</span><div id="listOther"></div></div>
   </div>
 
+  <div class="load-more-wrap" id="loadMoreWrap">
+    <button class="load-more-btn" id="loadMoreBtn">Load More</button>
+  </div>
+
   <footer class="footer">
     <div class="footer-logo">
       <div class="footer-logo-main">
@@ -358,8 +373,14 @@ body {
   "use strict";
 
   /* ── CONFIG ── */
-  const APPS_SCRIPT_URL = "https://script.googleusercontent.com/macros/echo?user_content_key=AUkAhnSW6RfH_Su50hZKk7-rkIrmp8BIzrE-Uy7j8OIMvgI_DubGHjagajR166KEqP7pZXGKnYtZUR0gZ9Dq7JkPFEMOF9IY1pG5o3bAxSWQuFDqI8iVaWnbT--5Dclo8ry-oD7m_Gjhd2NtWiCQ33Mg55bbz5ww49YmxYDImvRK8LolelpBhIEnBPC4s0JRCdM7DAYOVyVoIy-e6GB_AWXifUXcZDmquAvvKrfPv2yuW86Le0x_cyVasY5Qq-azazCjy60jVz1NmOjmU4Ggy7I0Ui9VyK8Hww&lib=MQvH1oNXORlSfTL6bZy6g8qVbd-sMNuMy";
-  const FETCH_TIMEOUT_MS = 10000;
+  // ⚠️ IMPORTANT: Use your Apps Script /exec URL here, NOT the /echo URL.
+  // The /echo URL is a cached snapshot that expires and causes CORS failures on GitHub Pages.
+  // To get your /exec URL: Apps Script → Deploy → Manage Deployments → copy the Web App URL.
+  const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX/exec";
+  // ^ Replace the URL above with your actual /exec deployment URL
+
+  const FETCH_TIMEOUT_MS = 12000;
+  const PAGE_SIZE = 30;
 
   const COL = {
     name:     "Business Name",
@@ -384,10 +405,14 @@ body {
   ];
 
   /* ── STATE ── */
-  let DATA      = [];
-  let activeCat  = "all";
-  let activeCity = "all";
+  let DATA        = [];   // all approved records
+  let INDEX       = [];   // pre-built search strings, parallel to DATA
+  let filtered    = [];   // indices into DATA after cat/city/search filters
+  let rendered    = 0;    // how many of filtered[] are in the DOM right now
+  let activeCat   = "all";
+  let activeCity  = "all";
   let searchTimer = null;
+  let _lastCard   = null;
 
   /* ── DOM REFS ── */
   const $status    = document.getElementById("statusMsg");
@@ -401,13 +426,12 @@ body {
   const $modalCat  = document.getElementById("modalCat");
   const $modalBody = document.getElementById("modalBody");
   const $closeBtn  = document.getElementById("modalCloseBtn");
+  const $loadWrap  = document.getElementById("loadMoreWrap");
+  const $loadBtn   = document.getElementById("loadMoreBtn");
 
-  /* ── SAFE TEXT HELPER ── */
-  function safeText(s) {
-    return s == null ? "" : String(s);
-  }
+  /* ── SAFE TEXT ── */
+  function safeText(s) { return s == null ? "" : String(s); }
 
-  /* ── IMAGE URL ── */
   function getImageUrl(url) {
     if (!url) return "";
     const m = String(url).match(/[-\w]{25,}/);
@@ -415,38 +439,89 @@ body {
     return "https://drive.google.com/thumbnail?id=" + m[0] + "&sz=w400";
   }
 
-  /* ── DATA HELPERS ── */
   function catOf(d) { return safeText(d[COL.category]).toLowerCase(); }
   function matchesCat(d, kws) { const c = catOf(d); return kws.some(k => c.includes(k)); }
   function cityOf(d) { return safeText(d[COL.city]).toLowerCase().trim(); }
 
+  /* ── SEARCH INDEX: one string per record, built once after fetch ── */
+  function buildIndex(data) {
+    return data.map(d =>
+      [d[COL.name], d[COL.city], d[COL.services], d[COL.category], d[COL.phone]]
+        .map(safeText).join(" ").toUpperCase()
+    );
+  }
+
   /* ── FETCH WITH TIMEOUT ── */
   function fetchWithTimeout(url, ms) {
-    const ctrl = new AbortController();
+    const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
     return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
   }
 
-  /* ── BOOTSTRAP ── */
+  /* ── JSONP FALLBACK ── */
+  // If fetch fails due to CORS (common with Apps Script on GitHub Pages),
+  // we fall back to JSONP which bypasses CORS entirely.
+  function fetchViaJsonp(url, ms) {
+    return new Promise((resolve, reject) => {
+      const cbName = "__featDir_" + Date.now();
+      const timer  = setTimeout(() => {
+        delete window[cbName];
+        if (script.parentNode) script.parentNode.removeChild(script);
+        reject(new Error("JSONP timeout"));
+      }, ms);
+
+      window[cbName] = function (data) {
+        clearTimeout(timer);
+        delete window[cbName];
+        if (script.parentNode) script.parentNode.removeChild(script);
+        resolve(data);
+      };
+
+      const script = document.createElement("script");
+      script.src   = url + (url.includes("?") ? "&" : "?") + "callback=" + cbName;
+      script.onerror = function () {
+        clearTimeout(timer);
+        delete window[cbName];
+        reject(new Error("JSONP script load failed"));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  /* ── BOOTSTRAP: try fetch first, fall back to JSONP ── */
+  function showError(msg) {
+    $status.textContent  = msg;
+    $status.className    = "error";
+    $status.style.display = "block";   // ← this was the silent-failure bug: error hidden when it fired
+  }
+
+  function processData(raw) {
+    if (!Array.isArray(raw)) throw new Error("Unexpected data format");
+    DATA  = raw.filter(d => safeText(d[COL.status]).trim().toLowerCase() === "approved");
+    INDEX = buildIndex(DATA);
+    buildCityDropdown();
+    applyFilters();
+  }
+
+  $status.textContent   = "Loading directory data…";
+  $status.style.display = "block";
+
   fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
-    .then(r => {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    })
-    .then(raw => {
-      if (!Array.isArray(raw)) throw new Error("Unexpected data format");
-      DATA = raw.filter(d =>
-        safeText(d[COL.status]).trim().toLowerCase() === "approved"
-      );
-      buildCityDropdown();
-      render();
-    })
-    .catch(err => {
-      const msg = err.name === "AbortError"
-        ? "Request timed out. Please check your connection and refresh."
-        : "Error loading data. Please refresh and try again.";
-      $status.textContent = msg;
-      $status.classList.add("error");
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(processData)
+    .catch(fetchErr => {
+      // Fetch failed — try JSONP (handles CORS blocks silently)
+      $status.textContent = "Connecting… please wait.";
+      fetchViaJsonp(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
+        .then(processData)
+        .catch(jsonpErr => {
+          // Both failed — show a clear, visible error
+          showError(
+            fetchErr.name === "AbortError"
+              ? "⚠ Request timed out. Check your internet connection and refresh."
+              : "⚠ Could not load data (" + fetchErr.message + "). Please refresh."
+          );
+        });
     });
 
   /* ── CITY DROPDOWN ── */
@@ -454,7 +529,6 @@ body {
     const cities = Array.from(
       new Set(DATA.map(d => safeText(d[COL.city]).trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
-
     cities.forEach(city => {
       const opt = document.createElement("option");
       opt.value = city.toLowerCase();
@@ -463,46 +537,61 @@ body {
     });
   }
 
-  /* ── RENDER ── */
-  function render() {
-    let total = 0;
+  /* ── APPLY FILTERS: rebuild filtered[] from DATA, then render first batch ── */
+  function applyFilters() {
+    const q = $search.value.trim().toUpperCase();
 
-    RENDER_GROUPS.forEach(g => {
-      const catMatch = activeCat === "all" || g.cats.includes(activeCat);
-      const items = catMatch
-        ? DATA.filter(d =>
-            matchesCat(d, g.keywords) &&
-            (activeCity === "all" || cityOf(d) === activeCity)
-          )
-        : [];
-
-      total += items.length;
-
-      // Build listing cards using DOM (safe — no innerHTML with user data)
-      const container = document.getElementById(g.listId);
-      container.innerHTML = "";
-      items.forEach((d, localIdx) => {
-        container.appendChild(createCard(d, DATA.indexOf(d)));
-      });
-
-      document.getElementById(g.blockId).style.display = items.length ? "block" : "none";
+    filtered = [];
+    DATA.forEach((d, i) => {
+      // category gate
+      if (activeCat !== "all") {
+        const g = RENDER_GROUPS.find(g => g.cats.includes(activeCat));
+        if (!g || !matchesCat(d, g.keywords)) return;
+      }
+      // city gate
+      if (activeCity !== "all" && cityOf(d) !== activeCity) return;
+      // search gate — scans pre-built INDEX string, never touches the DOM
+      if (q && !INDEX[i].includes(q)) return;
+      filtered.push(i);
     });
 
-    if (total === 0) {
-      $status.textContent = "No results found. Be the first to add one!";
-      $status.className = "";
-      $status.style.display = "block";
-      $dir.style.display = "none";
-      $count.style.display = "none";
-    } else {
-      $status.style.display = "none";
-      $dir.style.display = "block";
-      $count.style.display = "block";
-      $count.textContent = total + " listing" + (total !== 1 ? "s" : "") + " found";
-    }
+    // Clear all group containers
+    RENDER_GROUPS.forEach(g => {
+      document.getElementById(g.listId).innerHTML = "";
+      document.getElementById(g.blockId).style.display = "none";
+    });
+
+    rendered = 0;
+    renderNextBatch();
+    updateStatus();
   }
 
-  /* ── CREATE CARD (DOM-safe) ── */
+  /* ── RENDER BATCH: write only PAGE_SIZE cards at a time via DocumentFragment ── */
+  function renderNextBatch() {
+    const end = Math.min(rendered + PAGE_SIZE, filtered.length);
+
+    // One DocumentFragment per group = one DOM write per group, not one per card
+    const frags = {};
+    RENDER_GROUPS.forEach(g => { frags[g.listId] = document.createDocumentFragment(); });
+
+    for (let fi = rendered; fi < end; fi++) {
+      const dataIdx = filtered[fi];
+      const d = DATA[dataIdx];
+      const g = RENDER_GROUPS.find(grp => matchesCat(d, grp.keywords))
+             || RENDER_GROUPS[RENDER_GROUPS.length - 1];
+      frags[g.listId].appendChild(createCard(d, dataIdx));
+      document.getElementById(g.blockId).style.display = "block";
+    }
+
+    RENDER_GROUPS.forEach(g => {
+      document.getElementById(g.listId).appendChild(frags[g.listId]);
+    });
+
+    rendered = end;
+    updateLoadMore();
+  }
+
+  /* ── CREATE CARD (pure DOM, no innerHTML with user data) ── */
   function createCard(d, idx) {
     const card = document.createElement("div");
     card.className = "listing";
@@ -511,17 +600,9 @@ body {
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", "View details for " + safeText(d[COL.name]));
 
-    const name = document.createElement("div");
-    name.className = "l-name";
-    name.textContent = safeText(d[COL.name]);
-
-    const city = document.createElement("div");
-    city.className = "l-city";
-    city.textContent = safeText(d[COL.city]);
-
-    const phone = document.createElement("span");
-    phone.className = "l-phone";
-    phone.textContent = safeText(d[COL.phone]);
+    const name = document.createElement("div"); name.className = "l-name"; name.textContent = safeText(d[COL.name]);
+    const city = document.createElement("div"); city.className = "l-city"; city.textContent = safeText(d[COL.city]);
+    const phone = document.createElement("span"); phone.className = "l-phone"; phone.textContent = safeText(d[COL.phone]);
 
     card.appendChild(name);
     card.appendChild(city);
@@ -534,44 +615,49 @@ body {
       svcEl.textContent = svc.length > 40 ? svc.slice(0, 40) + "…" : svc;
       card.appendChild(svcEl);
     }
-
     return card;
   }
 
-  /* ── SEARCH (debounced) ── */
-  function applySearch() {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(_doSearch, 180);
-  }
-
-  function _doSearch() {
-    const q = $search.value.trim().toUpperCase();
-    render(); // reset visibility first
-    if (!q) return;
-
-    let total = 0;
-    RENDER_GROUPS.forEach(g => {
-      const block = document.getElementById(g.blockId);
-      if (block.style.display === "none") return;
-      let vis = 0;
-      block.querySelectorAll(".listing").forEach(card => {
-        const match = card.textContent.toUpperCase().includes(q);
-        card.style.display = match ? "" : "none";
-        if (match) vis++;
-      });
-      block.style.display = vis ? "block" : "none";
-      total += vis;
-    });
-
+  /* ── STATUS BAR ── */
+  function updateStatus() {
+    const total = filtered.length;
     if (total === 0) {
-      $status.textContent = "No matches for "" + $search.value.trim() + "".";
+      $status.textContent = $search.value.trim()
+        ? "No matches for "" + $search.value.trim() + ""."
+        : "No results found. Be the first to add one!";
+      $status.className = "";
       $status.style.display = "block";
       $dir.style.display = "none";
       $count.style.display = "none";
     } else {
-      $count.textContent = total + " match" + (total !== 1 ? "es" : "") + " found";
+      $status.style.display = "none";
+      $dir.style.display = "block";
+      $count.style.display = "block";
+      $count.textContent = total + " listing" + (total !== 1 ? "s" : "") + " found";
     }
   }
+
+  /* ── LOAD MORE ── */
+  function updateLoadMore() {
+    if (rendered < filtered.length) {
+      $loadWrap.style.display = "block";
+      $loadBtn.disabled = false;
+      $loadBtn.textContent = "Load More (" + (filtered.length - rendered) + " remaining)";
+    } else {
+      $loadWrap.style.display = "none";
+    }
+  }
+
+  $loadBtn.addEventListener("click", () => {
+    $loadBtn.disabled = true;
+    requestAnimationFrame(() => renderNextBatch()); // let browser breathe before next paint
+  });
+
+  /* ── SEARCH (debounced 200ms) ── */
+  $search.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(applyFilters, 200);
+  });
 
   /* ── MODAL OPEN ── */
   function openModal(idx) {
@@ -684,6 +770,7 @@ body {
   }
 
   /* ── EVENT WIRING ── */
+  /* ── CATEGORY FILTER ── */
   document.getElementById("catBtns").addEventListener("click", e => {
     const btn = e.target.closest("[data-cat]");
     if (!btn) return;
@@ -692,16 +779,14 @@ body {
       b.classList.toggle("active", b === btn)
     );
     $search.value = "";
-    render();
+    applyFilters();
   });
 
   $cityFilter.addEventListener("change", function () {
     activeCity = this.value;
     $search.value = "";
-    render();
+    applyFilters();
   });
-
-  $search.addEventListener("input", applySearch);
 
   $dir.addEventListener("click", e => {
     const card = e.target.closest(".listing");
