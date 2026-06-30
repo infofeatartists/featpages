@@ -119,6 +119,7 @@ body {
   letter-spacing: 1px; color: var(--faint); display: block;
 }
 #statusMsg.error { color: var(--red); }
+#statusMsg.stale { color: var(--red); }
 #resultCount {
   font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 1px; color: var(--faint);
@@ -313,16 +314,117 @@ body {
 </div>
 
 <script>
+"use strict";
+
+/* ============================================================
+   CONFIG
+   ============================================================ */
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+const CACHE_KEY     = "featpages_directory_cache_v1";
+const CACHE_TTL_MS  = 30 * 60 * 1000; // 30 minutes
+const FETCH_TIMEOUT_MS = 10000;
+const SEARCH_DEBOUNCE_MS = 200;
 
-let DATA = [], activeCat = "all", activeCity = "all";
+/* ============================================================
+   SCHEMA MAPPING LAYER
+   Raw Google Sheet headers are fragile (exact strings, trailing
+   spaces, case-sensitivity). This layer normalizes raw rows into
+   a clean internal shape ONE time at load, so the rest of the
+   app never touches raw header strings again.
+   ============================================================ */
 
-const COL = {
-  name:"Business Name", owner:"Owner Name", phone:"Phone Number ",
-  city:"City", category:"Category", services:"Services Offered",
-  address:"Full Address", notes:"Additional note on service provided",
-  status:"status", image:"Business Image"
+// Raw header keys exactly as returned by the Apps Script/Sheet.
+// If the sheet headers change, only this object needs updating.
+const RAW_KEYS = {
+  name:     ["Business Name"],
+  owner:    ["Owner Name"],
+  phone:    ["Phone Number ", "Phone Number", "Phone"],
+  city:     ["City"],
+  category: ["Category"],
+  services: ["Services Offered", "Services"],
+  address:  ["Full Address", "Address"],
+  notes:    ["Additional note on service provided", "Notes", "Additional Note"],
+  status:   ["status", "Status"],
+  image:    ["Business Image", "Image"]
 };
+
+function pickRaw(row, candidates) {
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] != null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  // fall back to first candidate even if empty/missing, so we always get a string
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
+  }
+  return "";
+}
+
+function normalizeRow(row) {
+  const clean = {};
+  for (const field in RAW_KEYS) {
+    clean[field] = String(pickRaw(row, RAW_KEYS[field]) ?? "").trim();
+  }
+  // precompute lowercase helpers used repeatedly for filtering/search
+  clean._categoryLc = clean.category.toLowerCase();
+  clean._cityLc = clean.city.toLowerCase();
+  clean._statusLc = clean.status.toLowerCase();
+  clean._searchBlob = [clean.name, clean.city, clean.services, clean.owner]
+    .join(" ").toUpperCase();
+  return clean;
+}
+
+function normalizeDataset(rawArray) {
+  if (!Array.isArray(rawArray)) return [];
+  return rawArray
+    .map(normalizeRow)
+    .filter(d => d._statusLc === "approved");
+}
+
+/* ============================================================
+   CACHE LAYER (localStorage, 30 min TTL, graceful fallback)
+   ============================================================ */
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.data) || typeof parsed.ts !== "number") return null;
+    return parsed;
+  } catch (e) {
+    return null; // corrupted cache, ignore
+  }
+}
+
+function writeCache(data) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch (e) {
+    // localStorage full or unavailable (private browsing etc) — fail silently,
+    // app still works, it just won't cache.
+  }
+}
+
+function isCacheFresh(entry) {
+  return entry && (Date.now() - entry.ts) < CACHE_TTL_MS;
+}
+
+function fetchWithTimeout(url, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
+/* ============================================================
+   APP STATE
+   ============================================================ */
+let DATA = [];           // normalized, approved-only rows
+let activeCat = "all";
+let activeCity = "all";
+let searchQuery = "";
+let usingStaleCache = false;
 
 const RENDER_GROUPS = [
   { cats:["tailor"],       keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor"  },
@@ -334,113 +436,195 @@ const RENDER_GROUPS = [
 ];
 
 function esc(s){ if(s==null)return""; return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-function catOf(d){ return(d[COL.category]||"").toLowerCase(); }
-function matchesCat(d,kws){ const c=catOf(d); return kws.some(k=>c.includes(k)); }
-function cityOf(d){ return(d[COL.city]||"").toLowerCase().trim(); }
+function matchesCat(d,kws){ return kws.some(k=>d._categoryLc.includes(k)); }
 
-/* ── FIXED: use drive.google.com/thumbnail which is the current stable endpoint ── */
+/* ============================================================
+   IMAGE URL HANDLING
+   ============================================================ */
 function getImageUrl(url) {
   if (!url) return "";
-  const m = url.match(/[-\w]{25,}/);
+  const m = String(url).match(/[-\w]{25,}/);
   if (!m) return "";
   const id = m[0];
   return `https://drive.google.com/thumbnail?id=${id}&sz=w400`;
 }
 
-fetch(APPS_SCRIPT_URL)
-  .then(r=>{ if(!r.ok)throw new Error("Network error"); return r.json(); })
-  .then(raw=>{
-    DATA = Array.isArray(raw) ? raw.filter(d=>(d[COL.status]||"").trim().toLowerCase()==="approved") : [];
+/* ============================================================
+   DATA LOADING — cache-first, network fallback, stale fallback
+   ============================================================ */
+function loadData() {
+  const cached = readCache();
+
+  // 1. Fresh cache: use immediately, skip network entirely.
+  if (isCacheFresh(cached)) {
+    DATA = cached.data;
+    usingStaleCache = false;
     buildCityDropdown();
     render();
-  })
-  .catch(err=>{
-    const s = document.getElementById("statusMsg");
-    s.textContent = "Error loading data. Please refresh and try again.";
-    s.classList.add("error");
-  });
+    return;
+  }
+
+  // 2. Stale or no cache: show stale data immediately if we have it
+  //    (so the UI isn't blank while we refetch), then try network.
+  if (cached) {
+    DATA = cached.data;
+    buildCityDropdown();
+    render();
+  }
+
+  fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
+    .then(r => { if (!r.ok) throw new Error("Network error " + r.status); return r.json(); })
+    .then(raw => {
+      const normalized = normalizeDataset(raw);
+      if (normalized.length === 0 && cached && cached.data.length > 0) {
+        // Empty/garbage response but we have older good data — keep the old data.
+        usingStaleCache = true;
+        return;
+      }
+      DATA = normalized;
+      usingStaleCache = false;
+      writeCache(DATA);
+      buildCityDropdown();
+      render();
+    })
+    .catch(() => {
+      // Network failed — fall back gracefully to whatever cache we have.
+      if (cached) {
+        DATA = cached.data;
+        usingStaleCache = true;
+        buildCityDropdown();
+        render();
+      } else {
+        const s = document.getElementById("statusMsg");
+        s.textContent = "Unable to load directory data. Please check your connection and refresh.";
+        s.classList.add("error");
+        s.style.display = "block";
+        document.getElementById("directory").style.display = "none";
+        document.getElementById("resultCount").style.display = "none";
+      }
+    });
+}
 
 function buildCityDropdown(){
-  const cities = [...new Set(DATA.map(d=>(d[COL.city]||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const sel = document.getElementById("cityFilter");
+  // Reset to just the "All Cities" option before rebuilding, in case this
+  // runs twice (once for stale cache, once after fresh fetch resolves).
+  sel.innerHTML = '<option value="all">All Cities</option>';
+  const cities = [...new Set(DATA.map(d => d.city).filter(Boolean))]
+    .sort((a,b) => a.localeCompare(b));
   cities.forEach(city=>{
     const o = document.createElement("option");
     o.value = city.toLowerCase();
     o.textContent = city.charAt(0).toUpperCase() + city.slice(1).toLowerCase();
     sel.appendChild(o);
   });
+  sel.value = activeCity; // preserve selection across rebuilds if possible
 }
 
-function render(){
-  let total = 0;
-  RENDER_GROUPS.forEach(g=>{
-    const ok = activeCat==="all" || g.cats.includes(activeCat);
-    const items = ok ? DATA.filter(d=>matchesCat(d,g.keywords) && (activeCity==="all" || cityOf(d)===activeCity)) : [];
-    total += items.length;
-    document.getElementById(g.listId).innerHTML = items.map(d=>createCard(d, DATA.indexOf(d))).join("");
-    document.getElementById(g.blockId).style.display = items.length ? "block" : "none";
+/* ============================================================
+   FILTERING — pure, in-memory, data-driven (no live DOM queries)
+   ============================================================ */
+function computeFilteredGroups() {
+  const q = searchQuery.toUpperCase().trim();
+  return RENDER_GROUPS.map(g => {
+    const catOk = activeCat === "all" || g.cats.includes(activeCat);
+    if (!catOk) return { ...g, items: [] };
+    const items = DATA.filter(d => {
+      if (!matchesCat(d, g.keywords)) return false;
+      if (activeCity !== "all" && d._cityLc !== activeCity) return false;
+      if (q && !d._searchBlob.includes(q)) return false;
+      return true;
+    });
+    return { ...g, items };
   });
-  const s = document.getElementById("statusMsg"), c = document.getElementById("resultCount"), dir = document.getElementById("directory");
-  if(total===0){
-    s.textContent = "No results found. Be the first to add one!";
-    s.className = ""; s.style.display = "block";
-    dir.style.display = "none"; c.style.display = "none";
+}
+
+/* ============================================================
+   RENDER — single source of truth, driven entirely by state
+   ============================================================ */
+function render(){
+  const groups = computeFilteredGroups();
+  let total = 0;
+
+  groups.forEach(g => {
+    total += g.items.length;
+    document.getElementById(g.listId).innerHTML = g.items.map(d => createCard(d)).join("");
+    document.getElementById(g.blockId).style.display = g.items.length ? "block" : "none";
+  });
+
+  const s = document.getElementById("statusMsg");
+  const c = document.getElementById("resultCount");
+  const dir = document.getElementById("directory");
+
+  if (total === 0) {
+    s.className = "";
+    s.textContent = searchQuery.trim()
+      ? `No matches for "${searchQuery.trim()}".`
+      : "No results found. Be the first to add one!";
+    s.style.display = "block";
+    dir.style.display = "none";
+    c.style.display = "none";
+    return;
+  }
+
+  dir.style.display = "block";
+  c.style.display = "block";
+  c.textContent = `${total} listing${total!==1?"s":""} found`;
+
+  if (usingStaleCache) {
+    s.className = "stale";
+    s.textContent = "Showing saved data — live directory is temporarily unavailable.";
+    s.style.display = "block";
   } else {
-    s.style.display = "none"; dir.style.display = "block";
-    c.style.display = "block"; c.textContent = `${total} listing${total!==1?"s":""} found`;
+    s.style.display = "none";
   }
 }
 
-function createCard(d, idx){
-  const svc = (d[COL.services]||"").trim(), t = svc.length>40 ? svc.slice(0,40)+"…" : svc;
-  return `<div class="listing" data-idx="${idx}" role="button" tabindex="0" aria-label="View details for ${esc(d[COL.name])}">
-    <div class="l-name">${esc(d[COL.name])}</div>
-    <div class="l-city">${esc(d[COL.city])}</div>
-    <span class="l-phone">${esc(d[COL.phone])}</span>
+function createCard(d){
+  const svc = d.services, t = svc.length>40 ? svc.slice(0,40)+"…" : svc;
+  return `<div class="listing" data-key="${esc(d._key)}" role="button" tabindex="0" aria-label="View details for ${esc(d.name)}">
+    <div class="l-name">${esc(d.name)}</div>
+    <div class="l-city">${esc(d.city)}</div>
+    <span class="l-phone">${esc(d.phone)}</span>
     ${t?`<div class="l-services">${esc(t)}</div>`:""}
   </div>`;
 }
 
-function applySearch(){
-  const q = document.getElementById("searchInput").value.toUpperCase().trim();
-  render();
-  if(!q) return;
-  let total = 0;
-  RENDER_GROUPS.forEach(g=>{
-    const block = document.getElementById(g.blockId);
-    if(block.style.display==="none") return;
-    let vis = 0;
-    block.querySelectorAll(".listing").forEach(card=>{
-      const m = card.textContent.toUpperCase().includes(q);
-      card.style.display = m ? "" : "none";
-      if(m) vis++;
-    });
-    block.style.display = vis ? "block" : "none";
-    total += vis;
-  });
-  const s = document.getElementById("statusMsg"), c = document.getElementById("resultCount"), dir = document.getElementById("directory");
-  if(total===0){
-    s.textContent = `No matches for "${document.getElementById("searchInput").value}".`;
-    s.style.display = "block"; dir.style.display = "none"; c.style.display = "none";
-  } else {
-    c.textContent = `${total} match${total!==1?"es":""} found`;
-  }
+/* ============================================================
+   DEBOUNCE UTILITY
+   ============================================================ */
+function debounce(fn, wait) {
+  let t;
+  return function(...args) {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), wait);
+  };
 }
 
-function openModal(idx){
-  const d = DATA[idx]; if(!d) return;
-  document.getElementById("modalBizName").textContent = d[COL.name] || "—";
-  document.getElementById("modalCat").textContent = d[COL.category] || "";
-  const phone   = esc(d[COL.phone]   || "N/A");
-  const owner   = esc(d[COL.owner]   || "N/A");
-  const city    = esc(d[COL.city]    || "N/A");
-  const address = esc(d[COL.address] || "N/A");
-  const services = esc(d[COL.services] || "");
-  const notes   = esc(d[COL.notes]   || "");
-  const imgUrl  = getImageUrl(d[COL.image]);
-  const imgHtml = imgUrl
-    ? `<img src="${imgUrl}" class="modal-img" alt="Business photo" onerror="this.outerHTML='<div class=\'no-img\'>No Image</div>'">`
-    : `<div class="no-img">No Image</div>`;
+const handleSearchInput = debounce(function () {
+  searchQuery = document.getElementById("searchInput").value;
+  render();
+}, SEARCH_DEBOUNCE_MS);
+
+/* ============================================================
+   MODAL — robust image fallback (handles missing url, load
+   error, and slow/broken thumbnail without breaking layout)
+   ============================================================ */
+function openModal(key){
+  const d = DATA.find(item => item._key === key);
+  if (!d) return;
+
+  document.getElementById("modalBizName").textContent = d.name || "—";
+  document.getElementById("modalCat").textContent = d.category || "";
+
+  const phone    = esc(d.phone    || "N/A");
+  const owner    = esc(d.owner    || "N/A");
+  const city     = esc(d.city     || "N/A");
+  const address  = esc(d.address  || "N/A");
+  const services = esc(d.services || "");
+  const notes    = esc(d.notes    || "");
+  const imgUrl   = getImageUrl(d.image);
+
   document.getElementById("modalBody").innerHTML = `
     <div class="modal-flex">
       <div class="modal-left">
@@ -451,27 +635,113 @@ function openModal(idx){
         ${services?`<div class="modal-field"><span class="modal-field-label">Services Offered</span><div class="modal-field-val modal-services-val">${services}</div></div>`:""}
         ${notes?`<div class="modal-field"><span class="modal-field-label">Additional Note</span><div class="modal-field-val modal-notes-val">${notes}</div></div>`:""}
       </div>
-      <div class="modal-right">${imgHtml}</div>
+      <div class="modal-right" id="modalImgSlot"></div>
     </div>`;
+
+  renderModalImage(imgUrl);
   document.getElementById("modal").classList.add("open");
+}
+
+// Renders the image with a real <img> load failure handler attached via JS
+// (instead of inline onerror string), and a guaranteed no-img placeholder
+// whenever there is no usable URL or the image fails to load.
+function renderModalImage(imgUrl) {
+  const slot = document.getElementById("modalImgSlot");
+  if (!slot) return;
+
+  if (!imgUrl) {
+    slot.innerHTML = `<div class="no-img">No Image</div>`;
+    return;
+  }
+
+  const img = document.createElement("img");
+  img.className = "modal-img";
+  img.alt = "Business photo";
+  img.loading = "lazy";
+  img.referrerPolicy = "no-referrer";
+  img.addEventListener("error", function onErr() {
+    img.removeEventListener("error", onErr);
+    const placeholder = document.createElement("div");
+    placeholder.className = "no-img";
+    placeholder.textContent = "No Image";
+    if (img.parentNode) img.parentNode.replaceChild(placeholder, img);
+  }, { once: true });
+
+  slot.innerHTML = "";
+  slot.appendChild(img);
+  // Set src last so the error handler is guaranteed to be attached first.
+  img.src = imgUrl;
 }
 
 function closeModal(){ document.getElementById("modal").classList.remove("open"); }
 
+/* ============================================================
+   Assign a stable lookup key to each row once, after normalization,
+   so cards/modal reference rows by key instead of fragile array index
+   (index breaks once filtering/search reorders or hides items).
+   ============================================================ */
+function assignKeys(rows) {
+  rows.forEach((d, i) => { d._key = d.name ? `${d.name}__${i}` : `row_${i}`; });
+  return rows;
+}
+
+// wrap normalizeDataset to also assign keys
+const _normalizeDatasetBase = normalizeDataset;
+normalizeDataset = function(rawArray) {
+  return assignKeys(_normalizeDatasetBase(rawArray));
+};
+// cache reads also need keys (in case cache predates this logic / for safety)
+function ensureKeys(data) {
+  if (data.length && data[0]._key) return data;
+  return assignKeys(data);
+}
+
+/* ============================================================
+   EVENT WIRING
+   ============================================================ */
 document.getElementById("catBtns").addEventListener("click", e=>{
   const btn = e.target.closest("[data-cat]"); if(!btn) return;
   activeCat = btn.dataset.cat;
   document.querySelectorAll("#catBtns [data-cat]").forEach(b=>b.classList.toggle("active", b===btn));
   document.getElementById("searchInput").value = "";
+  searchQuery = "";
   render();
 });
-document.getElementById("cityFilter").addEventListener("change", function(){ activeCity = this.value; document.getElementById("searchInput").value = ""; render(); });
-document.getElementById("searchInput").addEventListener("input", applySearch);
-document.getElementById("directory").addEventListener("click", e=>{ const card = e.target.closest(".listing"); if(card) openModal(parseInt(card.dataset.idx, 10)); });
-document.getElementById("directory").addEventListener("keydown", e=>{ if(e.key==="Enter"){ const card = e.target.closest(".listing"); if(card) openModal(parseInt(card.dataset.idx, 10)); } });
+
+document.getElementById("cityFilter").addEventListener("change", function(){
+  activeCity = this.value;
+  document.getElementById("searchInput").value = "";
+  searchQuery = "";
+  render();
+});
+
+document.getElementById("searchInput").addEventListener("input", handleSearchInput);
+
+document.getElementById("directory").addEventListener("click", e=>{
+  const card = e.target.closest(".listing");
+  if(card) openModal(card.dataset.key);
+});
+document.getElementById("directory").addEventListener("keydown", e=>{
+  if(e.key==="Enter"){
+    const card = e.target.closest(".listing");
+    if(card) openModal(card.dataset.key);
+  }
+});
 document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
 document.getElementById("modal").addEventListener("click", e=>{ if(e.target===document.getElementById("modal")) closeModal(); });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
+
+/* ============================================================
+   BOOT — patch readCache to ensure keys exist on cached rows too
+   ============================================================ */
+const _readCacheBase = readCache;
+readCache = function() {
+  const entry = _readCacheBase();
+  if (entry && Array.isArray(entry.data)) entry.data = ensureKeys(entry.data);
+  return entry;
+};
+
+loadData();
 </script>
 </body>
 </html>
