@@ -377,9 +377,10 @@ function normalizeRow(row) {
 
 function normalizeDataset(rawArray) {
   if (!Array.isArray(rawArray)) return [];
-  return rawArray
+  const rows = rawArray
     .map(normalizeRow)
     .filter(d => d._statusLc === "approved");
+  return assignKeys(rows);
 }
 
 /* ============================================================
@@ -391,6 +392,7 @@ function readCache() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.data) || typeof parsed.ts !== "number") return null;
+    parsed.data = ensureKeys(parsed.data);
     return parsed;
   } catch (e) {
     return null; // corrupted cache, ignore
@@ -685,12 +687,7 @@ function assignKeys(rows) {
   return rows;
 }
 
-// wrap normalizeDataset to also assign keys
-const _normalizeDatasetBase = normalizeDataset;
-normalizeDataset = function(rawArray) {
-  return assignKeys(_normalizeDatasetBase(rawArray));
-};
-// cache reads also need keys (in case cache predates this logic / for safety)
+// cache reads also need keys (in case an old cached payload predates this logic)
 function ensureKeys(data) {
   if (data.length && data[0]._key) return data;
   return assignKeys(data);
@@ -730,16 +727,6 @@ document.getElementById("directory").addEventListener("keydown", e=>{
 document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
 document.getElementById("modal").addEventListener("click", e=>{ if(e.target===document.getElementById("modal")) closeModal(); });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
-
-/* ============================================================
-   BOOT — patch readCache to ensure keys exist on cached rows too
-   ============================================================ */
-const _readCacheBase = readCache;
-readCache = function() {
-  const entry = _readCacheBase();
-  if (entry && Array.isArray(entry.data)) entry.data = ensureKeys(entry.data);
-  return entry;
-};
 
 loadData();
 </script>
