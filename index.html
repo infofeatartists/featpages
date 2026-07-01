@@ -239,17 +239,7 @@ body {
   display: block; margin-bottom: 2px;
 }
 .modal-field-val { font-family: 'Rajdhani', sans-serif; font-size: 15px; font-weight: 600; color: var(--black); line-height: 1.5; }
-.modal-maps-link {
-  display: flex; align-items: center; gap: 5px;
-  width: fit-content;
-  margin-top: 6px; padding: 4px 10px;
-  background: var(--black); color: var(--white);
-  border: 2px solid var(--black);
-  font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.5px; text-decoration: none;
-  cursor: pointer; transition: background 0.15s, color 0.15s;
-}
-.modal-maps-link:hover { background: var(--white); color: var(--black); }
+
 .modal-services-val { background: rgba(0,0,0,0.07); padding: 8px 10px; font-size: 14px; line-height: 1.6; font-family: 'Rajdhani', sans-serif; }
 .modal-notes-val { background: rgba(0,0,0,0.07); padding: 8px 10px; font-size: 14px; line-height: 1.6; font-family: 'Rajdhani', sans-serif; }
 .modal-flex { display: flex; gap: 20px; align-items: flex-start; }
@@ -522,20 +512,7 @@ function esc(s) {
 }
 function matchesCat(d, kws) { return kws.some(k => d._categoryLc.includes(k)); }
 
-/* ============================================================
-   GOOGLE MAPS LINK — Fix #1: validate URL origin before injection
-   ============================================================ */
-const MAPS_BASE = "https://www.google.com/maps/search/?api=1&query=";
 
-function getMapsUrl(rawAddress) {
-  const a = String(rawAddress || "").trim();
-  if (!a || a.toUpperCase() === "N/A") return "";
-  const url = MAPS_BASE + encodeURIComponent(a);
-  // Belt-and-suspenders: confirm the constructed URL starts with our known safe base.
-  // This guards against any future code change accidentally altering the prefix.
-  if (!url.startsWith(MAPS_BASE)) return "";
-  return url;
-}
 
 /* ============================================================
    IMAGE URL HANDLING
@@ -778,7 +755,7 @@ const handleSearchInput = debounce(function () {
 
 /* ============================================================
    MODAL
-   Fix #1: mapsUrl injected via esc() into href attribute.
+   MODAL
    ============================================================ */
 function openModal(key) {
   const d = DATA.find(item => item._key === key);
@@ -794,8 +771,6 @@ function openModal(key) {
   const services = esc(d.services || "");
   const notes    = esc(d.notes    || "");
   const imgUrl   = getImageUrl(d.image);
-  // Fix #1: esc() the final URL string before embedding in innerHTML href.
-  const mapsUrl  = esc(getMapsUrl(d.address));
 
   document.getElementById("modalBody").innerHTML = `
     <div class="modal-flex">
@@ -815,7 +790,6 @@ function openModal(key) {
         <div class="modal-field">
           <span class="modal-field-label">Full Address</span>
           <span class="modal-field-val">${address}</span>
-          ${mapsUrl ? `<a class="modal-maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">📍 View on Google Maps</a>` : ""}
         </div>
         ${services ? `<div class="modal-field"><span class="modal-field-label">Services Offered</span><div class="modal-field-val modal-services-val">${services}</div></div>` : ""}
         ${notes    ? `<div class="modal-field"><span class="modal-field-label">Additional Note</span><div class="modal-field-val modal-notes-val">${notes}</div></div>` : ""}
