@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FEAT. PAGES — India Repair Directory</title>
 
-<!-- ── SEO & Social Sharing (Fix #8) ── -->
+<!-- ── SEO & Social Sharing ── -->
 <meta name="description" content="Find trusted local repair professionals across India — tailors, cobblers, dry cleaners, dyers, and more. Community-built. Not-for-profit.">
 <meta name="robots" content="index, follow">
 <meta property="og:type"        content="website">
@@ -186,7 +186,6 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
 }
 
-/* ── Skeleton loader (Fix #9) ── */
 .skeleton-card {
   break-inside: avoid; margin-bottom: 14px;
   border-bottom: 1px dotted rgba(0,0,0,0.25);
@@ -320,6 +319,13 @@ body {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
+
+/* Non-fatal data-quality banner (schema drift, partial load, etc.) */
+#devWarning {
+  display: none; font-family: 'Space Mono', monospace; font-size: 11px;
+  background: #fff3cd; color: #664d03; border: 1px solid #ffe69c;
+  padding: 8px 12px; margin: 10px 0; letter-spacing: 0.3px;
+}
 </style>
 </head>
 <body>
@@ -360,6 +366,7 @@ body {
     <input type="text" id="searchInput" placeholder="Search by name, city or service…" autocomplete="off" spellcheck="false" aria-label="Search directory">
   </div>
 
+  <div id="devWarning" role="status"></div>
   <div id="statusMsg" role="status" aria-live="polite">Loading directory data…</div>
   <div id="resultCount"></div>
   <div id="liveRegion" class="visually-hidden" role="status" aria-live="polite"></div>
@@ -407,17 +414,34 @@ body {
 /* ============================================================
    CONFIG
    ============================================================ */
-const APPS_SCRIPT_URL    = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
-// TODO: replace <GH_USERNAME>/<GH_REPO> below with your actual GitHub Pages repo path
-// e.g. "https://waxusername.github.io/feat-pages/data.json"
-// This is the PRIMARY read path — served by GitHub's CDN, no Apps Script bottleneck.
+// This is the PRIMARY read path for every regular visitor — served
+// by GitHub's CDN, so normal traffic never touches Apps Script.
 const DATA_JSON_URL      = "https://infofeatartists.github.io/featpages/data.json";
-const CACHE_KEY          = "featpages_directory_cache_v2"; // bumped version — old cache auto-ignored
-const CACHE_TTL_MS       = 30 * 60 * 1000;  // 30 minutes fresh window
-const CACHE_SIZE_LIMIT   = 4 * 1024 * 1024; // 4MB — stay under the 5MB browser wall (Fix #4)
-const FETCH_TIMEOUT_MS   = 10000;
-const SEARCH_DEBOUNCE_MS = 200;
-const STALE_RETRY_MS     = 2 * 60 * 1000;   // retry background fetch after 2 min if stale (Fix #7)
+
+// Admin-only fallback. NEVER called by regular page loads. See the
+// "ADMIN FORCE REFRESH" section below for how/why it's gated.
+const APPS_SCRIPT_URL    = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+// Must match the ADMIN_TOKEN Script Property on the Apps Script side.
+// Change this to your own long random string, and set the same value
+// as ADMIN_TOKEN in Apps Script → Project Settings → Script Properties.
+const ADMIN_TOKEN        = "UP08FU3lPHwHGXG38f3ThmAJCEnL8Il8C0JVigcpZak";
+
+const CACHE_KEY           = "featpages_directory_cache_v2";
+const CACHE_TTL_MS        = 30 * 60 * 1000;   // 30 minutes fresh window
+const CACHE_SIZE_LIMIT    = 4 * 1024 * 1024;  // 4MB — stay under the 5MB browser wall
+const FETCH_TIMEOUT_MS    = 10000;
+const SEARCH_DEBOUNCE_MS  = 200;
+
+// Stale-retry backoff schedule (ms). Keeps trying with increasing gaps
+// instead of a single one-shot attempt, so a brief outage doesn't strand
+// users on stale data until they manually reload.
+const STALE_RETRY_SCHEDULE_MS = [30000, 60000, 120000, 300000, 600000]; // 30s,1m,2m,5m,10m
+const STALE_RETRY_REPEAT_MS   = 10 * 60 * 1000; // after schedule exhausted, keep retrying every 10 min
+
+// Minimum fraction of rows that must carry a name to trust a payload.
+// Guards the CLIENT against a corrupted/partial JSON slipping through,
+// as a second line of defense behind the server-side check in Apps Script.
+const MIN_VALID_ROW_FRACTION = 0.3;
 
 /* ============================================================
    SCHEMA MAPPING LAYER
@@ -457,15 +481,12 @@ function normalizeRow(row) {
   clean._categoryLc = clean.category.toLowerCase();
   clean._cityLc     = clean.city.toLowerCase();
   clean._statusLc   = clean.status.toLowerCase();
-  // Fix #5: null-byte (\x00) separator prevents cross-field phantom matches.
-  // User input can never contain \x00, so "MUM" + "BAI" never fuses into "MUMBAI".
+  // null-byte separator prevents cross-field phantom matches in search.
   clean._searchBlob = [clean.name, clean.city, clean.services, clean.owner]
     .join("\x00").toUpperCase();
   return clean;
 }
 
-/* Fix #2: keys are assigned from the RAW array index (before status filtering),
-   so two businesses with the same name always get different keys.             */
 function normalizeDataset(rawArray) {
   if (!Array.isArray(rawArray)) return [];
   return rawArray
@@ -477,13 +498,39 @@ function normalizeDataset(rawArray) {
     .filter(d => d._statusLc === "approved");
 }
 
+/**
+ * CLIENT-SIDE SCHEMA-DRIFT GUARD
+ * Even though Apps Script now validates before publishing, this checks
+ * the payload actually consumed by THIS page — catching cases like a
+ * half-written GitHub commit, a stale CDN edge serving an old bad file,
+ * or a manual edit to data.json. Never throws; only downgrades trust
+ * and surfaces a small non-blocking banner.
+ */
+function assessDataQuality(normalized, rawLength) {
+  if (rawLength === 0) return { ok: false, reason: "empty" };
+  const withName = normalized.filter(d => d.name).length;
+  if (normalized.length > 0 && (withName / normalized.length) < MIN_VALID_ROW_FRACTION) {
+    return { ok: false, reason: "low-quality" };
+  }
+  return { ok: true };
+}
+
+function showDevWarning(msg) {
+  const el = document.getElementById("devWarning");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideDevWarning() {
+  const el = document.getElementById("devWarning");
+  if (el) el.style.display = "none";
+}
+
 /* ============================================================
    KEY SAFETY HELPERS
    ============================================================ */
-// Fix #3: check EVERY item, not just index 0, before trusting cache keys.
 function ensureKeys(data) {
   if (Array.isArray(data) && data.length > 0 && data.every(d => d._key)) return data;
-  // Fallback: re-key using position within the cached array (safe enough for display).
   data.forEach((d, i) => {
     if (!d._key) d._key = d.name ? `${d.name}__cached_${i}` : `row__cached_${i}`;
   });
@@ -491,8 +538,32 @@ function ensureKeys(data) {
 }
 
 /* ============================================================
-   URL PARAM HELPERS (admin cache-bust: ?refresh=1)
-   ============================================================ */
+   ADMIN FORCE REFRESH
+   ---------------------------------------------------------------
+   Historically this was `?refresh=1`, which any visitor could type
+   into the URL bar to make THEIR page call Apps Script directly —
+   bypassing the whole point of the GitHub-CDN read path and putting
+   Apps Script's execution quota at the mercy of anyone with the URL
+   (which is visible in this very script anyway).
+
+   Now:
+   - `?refresh=1` (no token) just cache-busts the GitHub JSON fetch.
+     Safe for anyone — it's still reading the CDN-hosted file, just
+     skipping the local browser cache. This is what 99% of "I want
+     the latest data" requests actually need, since Apps Script
+     re-exports to GitHub every 15 minutes anyway.
+   - `?refresh=1&token=...` calling Apps Script directly is ONLY
+     honored if the token matches ADMIN_TOKEN above AND the browser
+     hasn't done this in the last 10 minutes (localStorage cooldown).
+     This is defense-in-depth, not real security — the real security
+     is setting the Apps Script Web App deployment's "Who has access"
+     to "Only myself" so unauthorized calls are rejected by Google
+     itself, token or no token.
+   ---------------------------------------------------------------
+*/
+const ADMIN_COOLDOWN_KEY = "featpages_admin_refresh_last";
+const ADMIN_COOLDOWN_MS  = 10 * 60 * 1000;
+
 function wantsForceRefresh() {
   try {
     return new URLSearchParams(window.location.search).get("refresh") === "1";
@@ -501,12 +572,34 @@ function wantsForceRefresh() {
   }
 }
 
+function wantsAdminLiveRead() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("refresh") !== "1") return false;
+    const given = params.get("token") || "";
+    if (!given || given !== ADMIN_TOKEN || ADMIN_TOKEN.indexOf("REPLACE_WITH") === 0) return false;
+
+    const last = Number(localStorage.getItem(ADMIN_COOLDOWN_KEY) || "0");
+    if (Date.now() - last < ADMIN_COOLDOWN_MS) return false; // cooldown active
+
+    localStorage.setItem(ADMIN_COOLDOWN_KEY, String(Date.now()));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 /* ============================================================
-   CACHE LAYER — localStorage with sessionStorage overflow (Fix #4)
+   CACHE LAYER — localStorage with sessionStorage overflow,
+   byte-accurate size check (handles non-Latin script correctly)
    ============================================================ */
+function utf8ByteLength(str) {
+  if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(str).length;
+  return unescape(encodeURIComponent(str)).length; // fallback for very old browsers
+}
+
 function readCache() {
   try {
-    // Try localStorage first, then sessionStorage fallback.
     const raw = localStorage.getItem(CACHE_KEY) || sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -521,15 +614,12 @@ function readCache() {
 function writeCache(data) {
   try {
     const payload = JSON.stringify({ data, ts: Date.now() });
-    // Fix #4: check payload size before attempting to write.
-    if (payload.length > CACHE_SIZE_LIMIT) {
-      // Data too large for safe localStorage — use sessionStorage (tab-scoped, no quota error).
+    if (utf8ByteLength(payload) > CACHE_SIZE_LIMIT) {
       try { sessionStorage.setItem(CACHE_KEY, payload); } catch (e2) { /* full — skip silently */ }
       return;
     }
     localStorage.setItem(CACHE_KEY, payload);
   } catch (e) {
-    // localStorage quota exceeded — try sessionStorage as fallback.
     try {
       const payload = JSON.stringify({ data, ts: Date.now() });
       sessionStorage.setItem(CACHE_KEY, payload);
@@ -556,7 +646,8 @@ let activeCity     = "all";
 let searchQuery    = "";
 let usingStaleCache = false;
 let _retryTimer    = null;
-let lastUpdatedTs  = null; // Fix: "last updated" footer timestamp
+let _retryStep     = 0; // index into STALE_RETRY_SCHEDULE_MS
+let lastUpdatedTs  = null;
 
 const RENDER_GROUPS = [
   { cats:["tailor"],     keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor",  label: "tailors"            },
@@ -567,10 +658,6 @@ const RENDER_GROUPS = [
   { cats:["other"],      keywords:["other"],           listId:"listOther",   blockId:"blockOther",   label: "other listings"     },
 ];
 
-// Per-category keyword map — used when a SPECIFIC filter button is active,
-// so "Dry Clean" and "Rafu" (which share a display group) no longer bleed
-// into each other. The merged RENDER_GROUPS.keywords is only used for the
-// "All" view, where dry cleaners + rafu workers are meant to sit together.
 const CAT_KEYWORDS = {
   tailor:  ["tailor"],
   cobbler: ["cobbler", "mochi"],
@@ -589,8 +676,6 @@ function esc(s) {
 }
 function matchesCat(d, kws) { return kws.some(k => d._categoryLc.includes(k)); }
 
-
-
 /* ============================================================
    IMAGE URL HANDLING
    ============================================================ */
@@ -602,9 +687,7 @@ function getImageUrl(url) {
 }
 
 /* ============================================================
-   SKELETON LOADER (Fix #9)
-   Shows shimmer placeholder cards while data is loading from
-   network with no cache available, so the UI is never blank.
+   SKELETON LOADER
    ============================================================ */
 function skeletonCard() {
   return `<div class="skeleton-card">
@@ -620,7 +703,6 @@ function showSkeleton() {
   const s   = document.getElementById("statusMsg");
   s.style.display = "none";
   dir.style.display = "block";
-  // Show 3 skeleton cards per group as placeholders
   RENDER_GROUPS.forEach(g => {
     document.getElementById(g.listId).innerHTML = skeletonCard().repeat(3);
     document.getElementById(g.blockId).style.display = "block";
@@ -628,43 +710,53 @@ function showSkeleton() {
 }
 
 /* ============================================================
-   BACKGROUND RETRY (Fix #7)
-   When stale cache is being shown, schedule a silent background
-   refetch after STALE_RETRY_MS. If it succeeds, update the UI
-   and clear the stale banner without the user doing anything.
+   BACKGROUND RETRY WITH BACKOFF
+   Replaces the old single setTimeout: keeps retrying on an
+   increasing schedule, then settles into a steady repeat interval,
+   so a brief outage never permanently strands users on stale data.
    ============================================================ */
 function scheduleStaleRetry(cachedEntry) {
   clearTimeout(_retryTimer);
+  const delay = STALE_RETRY_SCHEDULE_MS[_retryStep] || STALE_RETRY_REPEAT_MS;
+
   _retryTimer = setTimeout(() => {
-    fetchWithTimeout(DATA_JSON_URL, FETCH_TIMEOUT_MS)
+    fetchWithTimeout(cacheBustUrl(DATA_JSON_URL), FETCH_TIMEOUT_MS)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(raw => {
         const normalized = normalizeDataset(raw);
-        if (normalized.length === 0) return; // still bad — leave stale data up
+        const quality = assessDataQuality(normalized, Array.isArray(raw) ? raw.length : 0);
+        if (!quality.ok) throw new Error("bad-payload");
+
         DATA = normalized;
         usingStaleCache = false;
+        _retryStep = 0;
         lastUpdatedTs = Date.now();
         writeCache(DATA);
+        hideDevWarning();
         buildCityDropdown();
         render();
         renderLastUpdated();
       })
       .catch(() => {
-        // Still failing — silent. User stays on stale data, no error flash.
+        // Still failing — advance the backoff step and try again later.
+        _retryStep = Math.min(_retryStep + 1, STALE_RETRY_SCHEDULE_MS.length);
+        scheduleStaleRetry(cachedEntry);
       });
-  }, STALE_RETRY_MS);
+  }, delay);
+}
+
+function cacheBustUrl(url) {
+  const sep = url.indexOf("?") === -1 ? "?" : "&";
+  return url + sep + "_cb=" + Date.now();
 }
 
 /* ============================================================
    DATA LOADING — cache-first → stale-while-revalidate → error
-   Admin cache-bust: ?refresh=1 in the URL skips the cache entirely
-   and forces a fresh network fetch (Fix #8).
    ============================================================ */
 function loadData() {
   const forceRefresh = wantsForceRefresh();
   const cached = forceRefresh ? null : readCache();
 
-  // 1. Fresh cache: use immediately, skip network.
   if (isCacheFresh(cached)) {
     DATA = cached.data;
     usingStaleCache = false;
@@ -675,8 +767,6 @@ function loadData() {
     return;
   }
 
-  // 2. Stale cache exists: paint UI immediately so user sees data,
-  //    then re-fetch in the background to refresh.
   if (cached) {
     DATA = cached.data;
     usingStaleCache = true;
@@ -684,33 +774,51 @@ function loadData() {
     buildCityDropdown();
     render();
     renderLastUpdated();
+    _retryStep = 0;
     scheduleStaleRetry(cached);
   } else {
-    // 3. No cache at all (or forced refresh): show skeleton while we wait.
     showSkeleton();
   }
 
-  // Admin force-refresh (?refresh=1) hits the live Apps Script directly for an
-  // instant up-to-the-second read. Everyone else reads the static GitHub JSON —
-  // fast, CDN-cached, and doesn't hammer Apps Script on every visit.
-  const readUrl = forceRefresh ? APPS_SCRIPT_URL : DATA_JSON_URL;
+  // Admin live-read (token + cooldown gated) hits Apps Script directly.
+  // Everyone else — including plain `?refresh=1` — reads the static,
+  // CDN-served GitHub JSON, optionally cache-busted.
+  const useAdminLive = wantsAdminLiveRead();
+  const readUrl = useAdminLive
+    ? APPS_SCRIPT_URL + "?token=" + encodeURIComponent(ADMIN_TOKEN)
+    : (forceRefresh ? cacheBustUrl(DATA_JSON_URL) : DATA_JSON_URL);
 
   fetchWithTimeout(readUrl, FETCH_TIMEOUT_MS)
     .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(raw => {
+      if (raw && raw.error) throw new Error(raw.error); // admin endpoint auth/error response
       const normalized = normalizeDataset(raw);
-      // Fix #6: treat an empty response as a failure if we have older good data.
-      if (normalized.length === 0 && cached && cached.data.length > 0) {
-        usingStaleCache = true;
-        render(); // re-render to refresh stale banner
-        scheduleStaleRetry(cached);
+      const quality = assessDataQuality(normalized, Array.isArray(raw) ? raw.length : 0);
+
+      if (!quality.ok) {
+        // Payload looks broken (empty or mostly unnamed rows). Never show
+        // garbage — prefer stale-but-good data if we have it.
+        if (cached && cached.data.length > 0) {
+          usingStaleCache = true;
+          showDevWarning("Latest data looked incomplete, so we're still showing the last good version.");
+          render();
+          scheduleStaleRetry(cached);
+        } else {
+          showDevWarning("Directory data looks incomplete right now. Showing what we have.");
+          DATA = normalized;
+          buildCityDropdown();
+          render();
+        }
         return;
       }
+
       DATA = normalized;
       usingStaleCache = false;
+      _retryStep = 0;
       lastUpdatedTs = Date.now();
       clearTimeout(_retryTimer);
       writeCache(DATA);
+      hideDevWarning();
       buildCityDropdown();
       render();
       renderLastUpdated();
@@ -718,20 +826,18 @@ function loadData() {
     .catch(() => {
       clearTimeout(_retryTimer);
       if (cached) {
-        // Had stale data — keep it, schedule another retry.
         DATA = cached.data;
         usingStaleCache = true;
         lastUpdatedTs = cached.ts;
         buildCityDropdown();
         render();
         renderLastUpdated();
+        _retryStep = 0;
         scheduleStaleRetry(cached);
       } else {
-        // No cache, no network — show error.
         const s   = document.getElementById("statusMsg");
         const dir = document.getElementById("directory");
         const c   = document.getElementById("resultCount");
-        // Clear skeleton before showing error.
         RENDER_GROUPS.forEach(g => {
           document.getElementById(g.listId).innerHTML = "";
           document.getElementById(g.blockId).style.display = "none";
@@ -741,6 +847,9 @@ function loadData() {
         s.style.display = "block";
         dir.style.display = "none";
         c.style.display = "none";
+        // Even total failure gets a retry loop, not a dead end.
+        _retryStep = 0;
+        scheduleStaleRetry(null);
       }
     });
 }
@@ -760,12 +869,9 @@ function buildCityDropdown() {
 }
 
 /* ============================================================
-   FILTERING — pure in-memory, data-driven (Fix #3 search also)
-   Fix #5: search uses \x00-separated blob so fields don't bleed.
+   FILTERING
    ============================================================ */
 function computeFilteredGroups() {
-  // Fix #5: query is matched against the \x00-separated blob.
-  // We also ensure the query itself can never contain \x00 (user keyboards can't type it).
   const q = searchQuery.replace(/\x00/g, "").toUpperCase().trim();
   return RENDER_GROUPS.map(g => {
     const catOk = activeCat === "all" || g.cats.includes(activeCat);
@@ -783,8 +889,24 @@ function computeFilteredGroups() {
 
 /* ============================================================
    RENDER
+   Wrapped so one malformed row (e.g. a wildly unexpected value
+   from a form submission) can't crash the entire page — it logs
+   and falls back to an error state instead of leaving a blank
+   screen.
    ============================================================ */
 function render() {
+  try {
+    renderInner();
+  } catch (e) {
+    console.error("Render failed:", e);
+    const s = document.getElementById("statusMsg");
+    s.className = "error";
+    s.textContent = "Something went wrong displaying the directory. Please refresh.";
+    s.style.display = "block";
+  }
+}
+
+function renderInner() {
   const groups = computeFilteredGroups();
   let total = 0;
 
@@ -821,8 +943,6 @@ function render() {
   }
 }
 
-/* Fix #7 (empty state): category + city aware message that turns
-   a dead end into a call-to-action to add the missing listing.  */
 function buildEmptyStateMessage() {
   const ADD_URL = "https://forms.gle/6yPvg3QR54nCB1og7";
   if (searchQuery.trim()) {
@@ -858,7 +978,7 @@ function createCard(d) {
 }
 
 /* ============================================================
-   LAST UPDATED FOOTER (relative time, refreshed every 60s)
+   LAST UPDATED FOOTER
    ============================================================ */
 function relativeTime(ts) {
   if (!ts) return "";
@@ -887,7 +1007,6 @@ function announce(msg) {
   const el = document.getElementById("liveRegion");
   if (!el) return;
   el.textContent = "";
-  // Re-set on next tick so repeated identical messages still announce.
   setTimeout(() => { el.textContent = msg || ""; }, 30);
 }
 
@@ -914,7 +1033,6 @@ function copyText(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     return navigator.clipboard.writeText(text);
   }
-  // Fallback for older/insecure contexts.
   return new Promise((resolve, reject) => {
     try {
       const ta = document.createElement("textarea");
@@ -944,7 +1062,6 @@ function shareListing(d) {
     navigator.share({ title: d.name, text, url: window.location.href }).catch(() => { /* user cancelled — ignore */ });
     return;
   }
-  // Fallback: copy the summary text to clipboard.
   copyText(text).then(() => {
     announce("Listing details copied to clipboard.");
     const btn = document.getElementById("shareBtn");
@@ -1045,7 +1162,6 @@ function openModal(key) {
   const shareBtn = document.getElementById("shareBtn");
   if (shareBtn) shareBtn.onclick = () => shareListing(d);
 
-  // ── Accessibility: remember focus, open, trap, announce ──
   _lastFocusedEl = document.activeElement;
   document.getElementById("modal").classList.add("open");
   announce(`Opened details for ${d.name}`);
@@ -1075,7 +1191,7 @@ function renderModalImage(imgUrl) {
   }, { once: true });
   slot.innerHTML = "";
   slot.appendChild(img);
-  img.src = imgUrl; // set src AFTER error handler is attached
+  img.src = imgUrl;
 }
 
 function closeModal() {
@@ -1085,7 +1201,6 @@ function closeModal() {
     _modalKeydownHandler = null;
   }
   announce("Closed listing details.");
-  // Restore focus to whatever opened the modal (a11y).
   if (_lastFocusedEl && typeof _lastFocusedEl.focus === "function") {
     _lastFocusedEl.focus();
   }
@@ -1094,18 +1209,12 @@ function closeModal() {
 
 /* ============================================================
    NEAR ME — Geolocation-based city auto-select
-   Uses the browser Geolocation API to get coordinates, then a
-   free, keyless reverse-geocoding lookup to resolve a city name,
-   which is matched (loosely) against the city dropdown options.
-   No maps, no API key, fails silently/gracefully if unsupported
-   or denied.
    ============================================================ */
 function findMatchingCityOption(cityGuess) {
   if (!cityGuess) return null;
   const sel = document.getElementById("cityFilter");
   const guess = cityGuess.toLowerCase();
   const options = Array.from(sel.options).filter(o => o.value !== "all");
-  // Exact match first, then partial/contains match either direction.
   let match = options.find(o => o.value === guess);
   if (!match) match = options.find(o => o.value.includes(guess) || guess.includes(o.value));
   return match ? match.value : null;
@@ -1200,6 +1309,18 @@ document.getElementById("modal").addEventListener("click", e => {
   if (e.target === document.getElementById("modal")) closeModal();
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && document.getElementById("modal").classList.contains("open")) closeModal(); });
+
+/* ============================================================
+   GLOBAL ERROR BOUNDARY
+   If anything unexpected throws outside the guarded paths above,
+   log it instead of leaving the page silently frozen mid-interaction.
+   ============================================================ */
+window.addEventListener("error", e => {
+  console.error("Unhandled error:", e.error || e.message);
+});
+window.addEventListener("unhandledrejection", e => {
+  console.error("Unhandled promise rejection:", e.reason);
+});
 
 /* ── Boot ── */
 loadData();
