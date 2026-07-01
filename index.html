@@ -408,6 +408,10 @@ body {
    CONFIG
    ============================================================ */
 const APPS_SCRIPT_URL    = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+// TODO: replace <GH_USERNAME>/<GH_REPO> below with your actual GitHub Pages repo path
+// e.g. "https://waxusername.github.io/feat-pages/data.json"
+// This is the PRIMARY read path — served by GitHub's CDN, no Apps Script bottleneck.
+const DATA_JSON_URL      = "https://infofeatartists.github.io/featpages/data.json";
 const CACHE_KEY          = "featpages_directory_cache_v2"; // bumped version — old cache auto-ignored
 const CACHE_TTL_MS       = 30 * 60 * 1000;  // 30 minutes fresh window
 const CACHE_SIZE_LIMIT   = 4 * 1024 * 1024; // 4MB — stay under the 5MB browser wall (Fix #4)
@@ -563,6 +567,20 @@ const RENDER_GROUPS = [
   { cats:["other"],      keywords:["other"],           listId:"listOther",   blockId:"blockOther",   label: "other listings"     },
 ];
 
+// Per-category keyword map — used when a SPECIFIC filter button is active,
+// so "Dry Clean" and "Rafu" (which share a display group) no longer bleed
+// into each other. The merged RENDER_GROUPS.keywords is only used for the
+// "All" view, where dry cleaners + rafu workers are meant to sit together.
+const CAT_KEYWORDS = {
+  tailor:  ["tailor"],
+  cobbler: ["cobbler", "mochi"],
+  dry:     ["dry"],
+  rafu:    ["rafu"],
+  dyer:    ["dyer"],
+  scrap:   ["scrap"],
+  other:   ["other"]
+};
+
 function esc(s) {
   if (s == null) return "";
   return String(s).replace(/[&<>'"]/g, c => (
@@ -618,7 +636,7 @@ function showSkeleton() {
 function scheduleStaleRetry(cachedEntry) {
   clearTimeout(_retryTimer);
   _retryTimer = setTimeout(() => {
-    fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
+    fetchWithTimeout(DATA_JSON_URL, FETCH_TIMEOUT_MS)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(raw => {
         const normalized = normalizeDataset(raw);
@@ -672,7 +690,12 @@ function loadData() {
     showSkeleton();
   }
 
-  fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
+  // Admin force-refresh (?refresh=1) hits the live Apps Script directly for an
+  // instant up-to-the-second read. Everyone else reads the static GitHub JSON —
+  // fast, CDN-cached, and doesn't hammer Apps Script on every visit.
+  const readUrl = forceRefresh ? APPS_SCRIPT_URL : DATA_JSON_URL;
+
+  fetchWithTimeout(readUrl, FETCH_TIMEOUT_MS)
     .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(raw => {
       const normalized = normalizeDataset(raw);
@@ -747,8 +770,9 @@ function computeFilteredGroups() {
   return RENDER_GROUPS.map(g => {
     const catOk = activeCat === "all" || g.cats.includes(activeCat);
     if (!catOk) return { ...g, items: [] };
+    const keywords = activeCat === "all" ? g.keywords : CAT_KEYWORDS[activeCat];
     const items = DATA.filter(d => {
-      if (!matchesCat(d, g.keywords)) return false;
+      if (!matchesCat(d, keywords)) return false;
       if (activeCity !== "all" && d._cityLc !== activeCity) return false;
       if (q && !d._searchBlob.includes(q)) return false;
       return true;
