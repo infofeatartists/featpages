@@ -3,7 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FEAT. PAGES — Repair Directory</title>
+<title>FEAT. PAGES — India Repair Directory</title>
+
+<!-- ── SEO & Social Sharing (Fix #8) ── -->
+<meta name="description" content="Find trusted local repair professionals across India — tailors, cobblers, dry cleaners, dyers, and more. Community-built. Not-for-profit.">
+<meta name="robots" content="index, follow">
+<meta property="og:type"        content="website">
+<meta property="og:title"       content="FEAT. PAGES — India Repair Directory">
+<meta property="og:description" content="Find trusted local repair professionals across India — tailors, cobblers, dry cleaners, dyers, and more. Community-built. Not-for-profit.">
+<meta property="og:image"       content="index1html.png">
+<meta name="twitter:card"       content="summary">
+<meta name="twitter:title"      content="FEAT. PAGES — India Repair Directory">
+<meta name="twitter:description" content="Find trusted local repair professionals across India. Community-built. Not-for-profit.">
+<meta name="theme-color"        content="#1a1a1a">
+
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -119,7 +132,7 @@ body {
   letter-spacing: 1px; color: var(--faint); display: block;
 }
 #statusMsg.error { color: var(--red); }
-#statusMsg.stale { color: var(--red); }
+#statusMsg.stale { color: var(--red); font-size: 11px; padding: 10px 20px; }
 #resultCount {
   font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 1px; color: var(--faint);
@@ -158,6 +171,33 @@ body {
   color: var(--black); margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
 }
+
+/* ── Skeleton loader (Fix #9) ── */
+.skeleton-card {
+  break-inside: avoid; margin-bottom: 14px;
+  border-bottom: 1px dotted rgba(0,0,0,0.25);
+  padding-bottom: 8px; padding-left: 4px;
+}
+.skeleton-line {
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0.07) 25%,
+    rgba(0,0,0,0.13) 50%,
+    rgba(0,0,0,0.07) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 2px;
+  height: 13px;
+  margin-bottom: 6px;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-line.sk-name  { width: 75%; height: 17px; }
+.skeleton-line.sk-city  { width: 45%; height: 12px; }
+.skeleton-line.sk-phone { width: 60%; height: 17px; }
+.skeleton-line.sk-svc   { width: 80%; height: 12px; }
+
 .modal-overlay {
   display: none; position: fixed; inset: 0;
   background: rgba(0,0,0,0.82); z-index: 200;
@@ -330,22 +370,19 @@ body {
 /* ============================================================
    CONFIG
    ============================================================ */
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
-const CACHE_KEY     = "featpages_directory_cache_v1";
-const CACHE_TTL_MS  = 30 * 60 * 1000; // 30 minutes
-const FETCH_TIMEOUT_MS = 10000;
+const APPS_SCRIPT_URL    = "https://script.google.com/macros/s/AKfycbwu1Q_ctejbC_R2zH27IC9eMI1D65kVpb87XcboraYqXrvlpE_mVLcjjwQDL-HvQLLF8Q/exec";
+const CACHE_KEY          = "featpages_directory_cache_v2"; // bumped version — old cache auto-ignored
+const CACHE_TTL_MS       = 30 * 60 * 1000;  // 30 minutes fresh window
+const CACHE_SIZE_LIMIT   = 4 * 1024 * 1024; // 4MB — stay under the 5MB browser wall (Fix #4)
+const FETCH_TIMEOUT_MS   = 10000;
 const SEARCH_DEBOUNCE_MS = 200;
+const STALE_RETRY_MS     = 2 * 60 * 1000;   // retry background fetch after 2 min if stale (Fix #7)
 
 /* ============================================================
    SCHEMA MAPPING LAYER
-   Raw Google Sheet headers are fragile (exact strings, trailing
-   spaces, case-sensitivity). This layer normalizes raw rows into
-   a clean internal shape ONE time at load, so the rest of the
-   app never touches raw header strings again.
+   Only this object knows raw Sheet header strings.
+   The rest of the app only ever touches clean field names.
    ============================================================ */
-
-// Raw header keys exactly as returned by the Apps Script/Sheet.
-// If the sheet headers change, only this object needs updating.
 const RAW_KEYS = {
   name:     ["Business Name"],
   owner:    ["Owner Name"],
@@ -365,7 +402,6 @@ function pickRaw(row, candidates) {
       return row[key];
     }
   }
-  // fall back to first candidate even if empty/missing, so we always get a string
   for (const key of candidates) {
     if (Object.prototype.hasOwnProperty.call(row, key)) return row[key];
   }
@@ -377,45 +413,75 @@ function normalizeRow(row) {
   for (const field in RAW_KEYS) {
     clean[field] = String(pickRaw(row, RAW_KEYS[field]) ?? "").trim();
   }
-  // precompute lowercase helpers used repeatedly for filtering/search
   clean._categoryLc = clean.category.toLowerCase();
-  clean._cityLc = clean.city.toLowerCase();
-  clean._statusLc = clean.status.toLowerCase();
+  clean._cityLc     = clean.city.toLowerCase();
+  clean._statusLc   = clean.status.toLowerCase();
+  // Fix #5: null-byte (\x00) separator prevents cross-field phantom matches.
+  // User input can never contain \x00, so "MUM" + "BAI" never fuses into "MUMBAI".
   clean._searchBlob = [clean.name, clean.city, clean.services, clean.owner]
-    .join(" ").toUpperCase();
+    .join("\x00").toUpperCase();
   return clean;
 }
 
+/* Fix #2: keys are assigned from the RAW array index (before status filtering),
+   so two businesses with the same name always get different keys.             */
 function normalizeDataset(rawArray) {
   if (!Array.isArray(rawArray)) return [];
-  const rows = rawArray
-    .map(normalizeRow)
+  return rawArray
+    .map((row, rawIdx) => {
+      const clean = normalizeRow(row);
+      clean._key = clean.name ? `${clean.name}__${rawIdx}` : `row__${rawIdx}`;
+      return clean;
+    })
     .filter(d => d._statusLc === "approved");
-  return assignKeys(rows);
 }
 
 /* ============================================================
-   CACHE LAYER (localStorage, 30 min TTL, graceful fallback)
+   KEY SAFETY HELPERS
+   ============================================================ */
+// Fix #3: check EVERY item, not just index 0, before trusting cache keys.
+function ensureKeys(data) {
+  if (Array.isArray(data) && data.length > 0 && data.every(d => d._key)) return data;
+  // Fallback: re-key using position within the cached array (safe enough for display).
+  data.forEach((d, i) => {
+    if (!d._key) d._key = d.name ? `${d.name}__cached_${i}` : `row__cached_${i}`;
+  });
+  return data;
+}
+
+/* ============================================================
+   CACHE LAYER — localStorage with sessionStorage overflow (Fix #4)
    ============================================================ */
 function readCache() {
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    // Try localStorage first, then sessionStorage fallback.
+    const raw = localStorage.getItem(CACHE_KEY) || sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.data) || typeof parsed.ts !== "number") return null;
     parsed.data = ensureKeys(parsed.data);
     return parsed;
   } catch (e) {
-    return null; // corrupted cache, ignore
+    return null;
   }
 }
 
 function writeCache(data) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+    const payload = JSON.stringify({ data, ts: Date.now() });
+    // Fix #4: check payload size before attempting to write.
+    if (payload.length > CACHE_SIZE_LIMIT) {
+      // Data too large for safe localStorage — use sessionStorage (tab-scoped, no quota error).
+      try { sessionStorage.setItem(CACHE_KEY, payload); } catch (e2) { /* full — skip silently */ }
+      return;
+    }
+    localStorage.setItem(CACHE_KEY, payload);
   } catch (e) {
-    // localStorage full or unavailable (private browsing etc) — fail silently,
-    // app still works, it just won't cache.
+    // localStorage quota exceeded — try sessionStorage as fallback.
+    try {
+      const payload = JSON.stringify({ data, ts: Date.now() });
+      sessionStorage.setItem(CACHE_KEY, payload);
+    } catch (e2) { /* both full — fail silently, app still runs */ }
   }
 }
 
@@ -426,38 +492,49 @@ function isCacheFresh(entry) {
 function fetchWithTimeout(url, ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 /* ============================================================
    APP STATE
    ============================================================ */
-let DATA = [];           // normalized, approved-only rows
-let activeCat = "all";
-let activeCity = "all";
-let searchQuery = "";
+let DATA           = [];
+let activeCat      = "all";
+let activeCity     = "all";
+let searchQuery    = "";
 let usingStaleCache = false;
+let _retryTimer    = null;
 
 const RENDER_GROUPS = [
-  { cats:["tailor"],       keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor"  },
-  { cats:["cobbler"],      keywords:["cobbler","mochi"], listId:"listCobbler", blockId:"blockCobbler" },
-  { cats:["dry","rafu"],   keywords:["dry","rafu"],      listId:"listCleaner", blockId:"blockCleaner" },
-  { cats:["dyer"],         keywords:["dyer"],            listId:"listDyer",    blockId:"blockDyer"    },
-  { cats:["scrap"],        keywords:["scrap"],           listId:"listScrap",   blockId:"blockScrap"   },
-  { cats:["other"],        keywords:["other"],           listId:"listOther",   blockId:"blockOther"   },
+  { cats:["tailor"],     keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor"  },
+  { cats:["cobbler"],    keywords:["cobbler","mochi"], listId:"listCobbler", blockId:"blockCobbler" },
+  { cats:["dry","rafu"], keywords:["dry","rafu"],      listId:"listCleaner", blockId:"blockCleaner" },
+  { cats:["dyer"],       keywords:["dyer"],            listId:"listDyer",    blockId:"blockDyer"    },
+  { cats:["scrap"],      keywords:["scrap"],           listId:"listScrap",   blockId:"blockScrap"   },
+  { cats:["other"],      keywords:["other"],           listId:"listOther",   blockId:"blockOther"   },
 ];
 
-function esc(s){ if(s==null)return""; return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-function matchesCat(d,kws){ return kws.some(k=>d._categoryLc.includes(k)); }
+function esc(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>'"]/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]
+  ));
+}
+function matchesCat(d, kws) { return kws.some(k => d._categoryLc.includes(k)); }
 
 /* ============================================================
-   GOOGLE MAPS LINK HANDLING
+   GOOGLE MAPS LINK — Fix #1: validate URL origin before injection
    ============================================================ */
+const MAPS_BASE = "https://www.google.com/maps/search/?api=1&query=";
+
 function getMapsUrl(rawAddress) {
   const a = String(rawAddress || "").trim();
   if (!a || a.toUpperCase() === "N/A") return "";
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+  const url = MAPS_BASE + encodeURIComponent(a);
+  // Belt-and-suspenders: confirm the constructed URL starts with our known safe base.
+  // This guards against any future code change accidentally altering the prefix.
+  if (!url.startsWith(MAPS_BASE)) return "";
+  return url;
 }
 
 /* ============================================================
@@ -467,17 +544,68 @@ function getImageUrl(url) {
   if (!url) return "";
   const m = String(url).match(/[-\w]{25,}/);
   if (!m) return "";
-  const id = m[0];
-  return `https://drive.google.com/thumbnail?id=${id}&sz=w400`;
+  return `https://drive.google.com/thumbnail?id=${m[0]}&sz=w400`;
 }
 
 /* ============================================================
-   DATA LOADING — cache-first, network fallback, stale fallback
+   SKELETON LOADER (Fix #9)
+   Shows shimmer placeholder cards while data is loading from
+   network with no cache available, so the UI is never blank.
+   ============================================================ */
+function skeletonCard() {
+  return `<div class="skeleton-card">
+    <div class="skeleton-line sk-name"></div>
+    <div class="skeleton-line sk-city"></div>
+    <div class="skeleton-line sk-phone"></div>
+    <div class="skeleton-line sk-svc"></div>
+  </div>`;
+}
+
+function showSkeleton() {
+  const dir = document.getElementById("directory");
+  const s   = document.getElementById("statusMsg");
+  s.style.display = "none";
+  dir.style.display = "block";
+  // Show 3 skeleton cards per group as placeholders
+  RENDER_GROUPS.forEach(g => {
+    document.getElementById(g.listId).innerHTML = skeletonCard().repeat(3);
+    document.getElementById(g.blockId).style.display = "block";
+  });
+}
+
+/* ============================================================
+   BACKGROUND RETRY (Fix #7)
+   When stale cache is being shown, schedule a silent background
+   refetch after STALE_RETRY_MS. If it succeeds, update the UI
+   and clear the stale banner without the user doing anything.
+   ============================================================ */
+function scheduleStaleRetry(cachedEntry) {
+  clearTimeout(_retryTimer);
+  _retryTimer = setTimeout(() => {
+    fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(raw => {
+        const normalized = normalizeDataset(raw);
+        if (normalized.length === 0) return; // still bad — leave stale data up
+        DATA = normalized;
+        usingStaleCache = false;
+        writeCache(DATA);
+        buildCityDropdown();
+        render();
+      })
+      .catch(() => {
+        // Still failing — silent. User stays on stale data, no error flash.
+      });
+  }, STALE_RETRY_MS);
+}
+
+/* ============================================================
+   DATA LOADING — cache-first → stale-while-revalidate → error
    ============================================================ */
 function loadData() {
   const cached = readCache();
 
-  // 1. Fresh cache: use immediately, skip network entirely.
+  // 1. Fresh cache: use immediately, skip network.
   if (isCacheFresh(cached)) {
     DATA = cached.data;
     usingStaleCache = false;
@@ -486,68 +614,87 @@ function loadData() {
     return;
   }
 
-  // 2. Stale or no cache: show stale data immediately if we have it
-  //    (so the UI isn't blank while we refetch), then try network.
+  // 2. Stale cache exists: paint UI immediately so user sees data,
+  //    then re-fetch in the background to refresh.
   if (cached) {
     DATA = cached.data;
+    usingStaleCache = true;
     buildCityDropdown();
     render();
+    scheduleStaleRetry(cached);
+  } else {
+    // 3. No cache at all: show skeleton while we wait.
+    showSkeleton();
   }
 
   fetchWithTimeout(APPS_SCRIPT_URL, FETCH_TIMEOUT_MS)
-    .then(r => { if (!r.ok) throw new Error("Network error " + r.status); return r.json(); })
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(raw => {
       const normalized = normalizeDataset(raw);
+      // Fix #6: treat an empty response as a failure if we have older good data.
       if (normalized.length === 0 && cached && cached.data.length > 0) {
-        // Empty/garbage response but we have older good data — keep the old data.
         usingStaleCache = true;
+        render(); // re-render to refresh stale banner
+        scheduleStaleRetry(cached);
         return;
       }
       DATA = normalized;
       usingStaleCache = false;
+      clearTimeout(_retryTimer);
       writeCache(DATA);
       buildCityDropdown();
       render();
     })
     .catch(() => {
-      // Network failed — fall back gracefully to whatever cache we have.
+      clearTimeout(_retryTimer);
       if (cached) {
+        // Had stale data — keep it, schedule another retry.
         DATA = cached.data;
         usingStaleCache = true;
         buildCityDropdown();
         render();
+        scheduleStaleRetry(cached);
       } else {
-        const s = document.getElementById("statusMsg");
-        s.textContent = "Unable to load directory data. Please check your connection and refresh.";
-        s.classList.add("error");
+        // No cache, no network — show error.
+        const s   = document.getElementById("statusMsg");
+        const dir = document.getElementById("directory");
+        const c   = document.getElementById("resultCount");
+        // Clear skeleton before showing error.
+        RENDER_GROUPS.forEach(g => {
+          document.getElementById(g.listId).innerHTML = "";
+          document.getElementById(g.blockId).style.display = "none";
+        });
+        s.className = "error";
+        s.textContent = "Unable to load directory. Check your connection and refresh.";
         s.style.display = "block";
-        document.getElementById("directory").style.display = "none";
-        document.getElementById("resultCount").style.display = "none";
+        dir.style.display = "none";
+        c.style.display = "none";
       }
     });
 }
 
-function buildCityDropdown(){
+function buildCityDropdown() {
   const sel = document.getElementById("cityFilter");
-  // Reset to just the "All Cities" option before rebuilding, in case this
-  // runs twice (once for stale cache, once after fresh fetch resolves).
   sel.innerHTML = '<option value="all">All Cities</option>';
   const cities = [...new Set(DATA.map(d => d.city).filter(Boolean))]
-    .sort((a,b) => a.localeCompare(b));
-  cities.forEach(city=>{
+    .sort((a, b) => a.localeCompare(b));
+  cities.forEach(city => {
     const o = document.createElement("option");
     o.value = city.toLowerCase();
     o.textContent = city.charAt(0).toUpperCase() + city.slice(1).toLowerCase();
     sel.appendChild(o);
   });
-  sel.value = activeCity; // preserve selection across rebuilds if possible
+  sel.value = activeCity;
 }
 
 /* ============================================================
-   FILTERING — pure, in-memory, data-driven (no live DOM queries)
+   FILTERING — pure in-memory, data-driven (Fix #3 search also)
+   Fix #5: search uses \x00-separated blob so fields don't bleed.
    ============================================================ */
 function computeFilteredGroups() {
-  const q = searchQuery.toUpperCase().trim();
+  // Fix #5: query is matched against the \x00-separated blob.
+  // We also ensure the query itself can never contain \x00 (user keyboards can't type it).
+  const q = searchQuery.replace(/\x00/g, "").toUpperCase().trim();
   return RENDER_GROUPS.map(g => {
     const catOk = activeCat === "all" || g.cats.includes(activeCat);
     if (!catOk) return { ...g, items: [] };
@@ -562,9 +709,9 @@ function computeFilteredGroups() {
 }
 
 /* ============================================================
-   RENDER — single source of truth, driven entirely by state
+   RENDER
    ============================================================ */
-function render(){
+function render() {
   const groups = computeFilteredGroups();
   let total = 0;
 
@@ -574,8 +721,8 @@ function render(){
     document.getElementById(g.blockId).style.display = g.items.length ? "block" : "none";
   });
 
-  const s = document.getElementById("statusMsg");
-  const c = document.getElementById("resultCount");
+  const s   = document.getElementById("statusMsg");
+  const c   = document.getElementById("resultCount");
   const dir = document.getElementById("directory");
 
   if (total === 0) {
@@ -585,39 +732,40 @@ function render(){
       : "No results found. Be the first to add one!";
     s.style.display = "block";
     dir.style.display = "none";
-    c.style.display = "none";
+    c.style.display   = "none";
     return;
   }
 
   dir.style.display = "block";
-  c.style.display = "block";
-  c.textContent = `${total} listing${total!==1?"s":""} found`;
+  c.style.display   = "block";
+  c.textContent = `${total} listing${total !== 1 ? "s" : ""} found`;
 
   if (usingStaleCache) {
-    s.className = "stale";
-    s.textContent = "Showing saved data — live directory is temporarily unavailable.";
+    s.className   = "stale";
+    s.textContent = "Showing saved data — refreshing in the background…";
     s.style.display = "block";
   } else {
     s.style.display = "none";
   }
 }
 
-function createCard(d){
-  const svc = d.services, t = svc.length>40 ? svc.slice(0,40)+"…" : svc;
+function createCard(d) {
+  const svc = d.services;
+  const t   = svc.length > 40 ? svc.slice(0, 40) + "…" : svc;
   return `<div class="listing" data-key="${esc(d._key)}" role="button" tabindex="0" aria-label="View details for ${esc(d.name)}">
     <div class="l-name">${esc(d.name)}</div>
     <div class="l-city">${esc(d.city)}</div>
     <span class="l-phone">${esc(d.phone)}</span>
-    ${t?`<div class="l-services">${esc(t)}</div>`:""}
+    ${t ? `<div class="l-services">${esc(t)}</div>` : ""}
   </div>`;
 }
 
 /* ============================================================
-   DEBOUNCE UTILITY
+   DEBOUNCE
    ============================================================ */
 function debounce(fn, wait) {
   let t;
-  return function(...args) {
+  return function (...args) {
     clearTimeout(t);
     t = setTimeout(() => fn.apply(this, args), wait);
   };
@@ -629,15 +777,15 @@ const handleSearchInput = debounce(function () {
 }, SEARCH_DEBOUNCE_MS);
 
 /* ============================================================
-   MODAL — robust image fallback (handles missing url, load
-   error, and slow/broken thumbnail without breaking layout)
+   MODAL
+   Fix #1: mapsUrl injected via esc() into href attribute.
    ============================================================ */
-function openModal(key){
+function openModal(key) {
   const d = DATA.find(item => item._key === key);
   if (!d) return;
 
   document.getElementById("modalBizName").textContent = d.name || "—";
-  document.getElementById("modalCat").textContent = d.category || "";
+  document.getElementById("modalCat").textContent     = d.category || "";
 
   const phone    = esc(d.phone    || "N/A");
   const owner    = esc(d.owner    || "N/A");
@@ -646,21 +794,31 @@ function openModal(key){
   const services = esc(d.services || "");
   const notes    = esc(d.notes    || "");
   const imgUrl   = getImageUrl(d.image);
-  const mapsUrl  = getMapsUrl(d.address);
+  // Fix #1: esc() the final URL string before embedding in innerHTML href.
+  const mapsUrl  = esc(getMapsUrl(d.address));
 
   document.getElementById("modalBody").innerHTML = `
     <div class="modal-flex">
       <div class="modal-left">
-        <div class="modal-field"><span class="modal-field-label">Phone Number</span><span class="modal-field-val">${phone}</span></div>
-        <div class="modal-field"><span class="modal-field-label">Owner / Contact</span><span class="modal-field-val">${owner}</span></div>
-        <div class="modal-field"><span class="modal-field-label">City</span><span class="modal-field-val">${city}</span></div>
+        <div class="modal-field">
+          <span class="modal-field-label">Phone Number</span>
+          <span class="modal-field-val">${phone}</span>
+        </div>
+        <div class="modal-field">
+          <span class="modal-field-label">Owner / Contact</span>
+          <span class="modal-field-val">${owner}</span>
+        </div>
+        <div class="modal-field">
+          <span class="modal-field-label">City</span>
+          <span class="modal-field-val">${city}</span>
+        </div>
         <div class="modal-field">
           <span class="modal-field-label">Full Address</span>
           <span class="modal-field-val">${address}</span>
           ${mapsUrl ? `<a class="modal-maps-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">📍 View on Google Maps</a>` : ""}
         </div>
-        ${services?`<div class="modal-field"><span class="modal-field-label">Services Offered</span><div class="modal-field-val modal-services-val">${services}</div></div>`:""}
-        ${notes?`<div class="modal-field"><span class="modal-field-label">Additional Note</span><div class="modal-field-val modal-notes-val">${notes}</div></div>`:""}
+        ${services ? `<div class="modal-field"><span class="modal-field-label">Services Offered</span><div class="modal-field-val modal-services-val">${services}</div></div>` : ""}
+        ${notes    ? `<div class="modal-field"><span class="modal-field-label">Additional Note</span><div class="modal-field-val modal-notes-val">${notes}</div></div>` : ""}
       </div>
       <div class="modal-right" id="modalImgSlot"></div>
     </div>`;
@@ -669,69 +827,44 @@ function openModal(key){
   document.getElementById("modal").classList.add("open");
 }
 
-// Renders the image with a real <img> load failure handler attached via JS
-// (instead of inline onerror string), and a guaranteed no-img placeholder
-// whenever there is no usable URL or the image fails to load.
 function renderModalImage(imgUrl) {
   const slot = document.getElementById("modalImgSlot");
   if (!slot) return;
-
-  if (!imgUrl) {
-    slot.innerHTML = `<div class="no-img">No Image</div>`;
-    return;
-  }
+  if (!imgUrl) { slot.innerHTML = `<div class="no-img">No Image</div>`; return; }
 
   const img = document.createElement("img");
-  img.className = "modal-img";
-  img.alt = "Business photo";
-  img.loading = "lazy";
+  img.className      = "modal-img";
+  img.alt            = "Business photo";
+  img.loading        = "lazy";
   img.referrerPolicy = "no-referrer";
-  img.addEventListener("error", function onErr() {
-    img.removeEventListener("error", onErr);
-    const placeholder = document.createElement("div");
-    placeholder.className = "no-img";
-    placeholder.textContent = "No Image";
-    if (img.parentNode) img.parentNode.replaceChild(placeholder, img);
+  img.addEventListener("error", () => {
+    const ph = document.createElement("div");
+    ph.className   = "no-img";
+    ph.textContent = "No Image";
+    if (img.parentNode) img.parentNode.replaceChild(ph, img);
   }, { once: true });
-
   slot.innerHTML = "";
   slot.appendChild(img);
-  // Set src last so the error handler is guaranteed to be attached first.
-  img.src = imgUrl;
+  img.src = imgUrl; // set src AFTER error handler is attached
 }
 
-function closeModal(){ document.getElementById("modal").classList.remove("open"); }
-
-/* ============================================================
-   Assign a stable lookup key to each row once, after normalization,
-   so cards/modal reference rows by key instead of fragile array index
-   (index breaks once filtering/search reorders or hides items).
-   ============================================================ */
-function assignKeys(rows) {
-  rows.forEach((d, i) => { d._key = d.name ? `${d.name}__${i}` : `row_${i}`; });
-  return rows;
-}
-
-// cache reads also need keys (in case an old cached payload predates this logic)
-function ensureKeys(data) {
-  if (data.length && data[0]._key) return data;
-  return assignKeys(data);
-}
+function closeModal() { document.getElementById("modal").classList.remove("open"); }
 
 /* ============================================================
    EVENT WIRING
    ============================================================ */
-document.getElementById("catBtns").addEventListener("click", e=>{
-  const btn = e.target.closest("[data-cat]"); if(!btn) return;
+document.getElementById("catBtns").addEventListener("click", e => {
+  const btn = e.target.closest("[data-cat]");
+  if (!btn) return;
   activeCat = btn.dataset.cat;
-  document.querySelectorAll("#catBtns [data-cat]").forEach(b=>b.classList.toggle("active", b===btn));
+  document.querySelectorAll("#catBtns [data-cat]").forEach(b => b.classList.toggle("active", b === btn));
   document.getElementById("searchInput").value = "";
   searchQuery = "";
   render();
 });
 
-document.getElementById("cityFilter").addEventListener("change", function(){
-  activeCity = this.value;
+document.getElementById("cityFilter").addEventListener("change", function () {
+  activeCity  = this.value;
   document.getElementById("searchInput").value = "";
   searchQuery = "";
   render();
@@ -739,20 +872,24 @@ document.getElementById("cityFilter").addEventListener("change", function(){
 
 document.getElementById("searchInput").addEventListener("input", handleSearchInput);
 
-document.getElementById("directory").addEventListener("click", e=>{
+document.getElementById("directory").addEventListener("click", e => {
   const card = e.target.closest(".listing");
-  if(card) openModal(card.dataset.key);
+  if (card) openModal(card.dataset.key);
 });
-document.getElementById("directory").addEventListener("keydown", e=>{
-  if(e.key==="Enter"){
+document.getElementById("directory").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
     const card = e.target.closest(".listing");
-    if(card) openModal(card.dataset.key);
+    if (card) openModal(card.dataset.key);
   }
 });
-document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
-document.getElementById("modal").addEventListener("click", e=>{ if(e.target===document.getElementById("modal")) closeModal(); });
-document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
 
+document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+document.getElementById("modal").addEventListener("click", e => {
+  if (e.target === document.getElementById("modal")) closeModal();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+/* ── Boot ── */
 loadData();
 </script>
 </body>
