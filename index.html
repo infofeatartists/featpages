@@ -104,6 +104,16 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23ffffff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 8px center;
 }
+.near-btn {
+  height: 36px; padding: 0 12px;
+  background: var(--white); color: var(--black);
+  border: 2px solid var(--black); cursor: pointer;
+  font-family: 'Teko', sans-serif; font-size: 16px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  transition: background 0.15s, color 0.15s;
+}
+.near-btn:hover { background: var(--black); color: var(--white); }
+.near-btn:disabled { opacity: 0.5; cursor: wait; }
 .add-btn {
   background: var(--white); color: var(--black);
   border: 2px solid var(--black); padding: 7px 14px;
@@ -133,6 +143,10 @@ body {
 }
 #statusMsg.error { color: var(--red); }
 #statusMsg.stale { color: var(--red); font-size: 11px; padding: 10px 20px; }
+#statusMsg .status-add-link {
+  display: inline-block; margin-top: 10px; text-transform: uppercase;
+  color: var(--black); text-decoration: underline; font-weight: 700;
+}
 #resultCount {
   font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 1px; color: var(--faint);
@@ -220,7 +234,8 @@ body {
   letter-spacing: 1px; cursor: pointer; background: none; border: none; padding: 6px 0;
 }
 .modal-close:hover { text-decoration: underline; }
-.modal-header { background: var(--black); color: var(--yellow); padding: 14px 20px 10px; }
+.modal-header { background: var(--black); color: var(--yellow); padding: 14px 20px 10px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.modal-header-text { flex: 1; min-width: 0; }
 .modal-biz-name {
   font-family: 'Teko', sans-serif; font-size: 28px; font-weight: 700;
   text-transform: uppercase; line-height: 1.1; letter-spacing: 1px;
@@ -231,6 +246,14 @@ body {
   padding: 2px 8px; text-transform: uppercase; margin-top: 6px;
   letter-spacing: 1px; color: rgba(255,255,255,0.8);
 }
+.share-btn {
+  flex-shrink: 0; background: transparent; color: var(--yellow);
+  border: 1px solid rgba(255,255,255,0.6); padding: 6px 10px;
+  font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
+  transition: background 0.15s, color 0.15s; white-space: nowrap;
+}
+.share-btn:hover { background: var(--yellow); color: var(--black); }
 .modal-body { padding: 18px 20px 20px; }
 .modal-field { margin-bottom: 12px; }
 .modal-field-label {
@@ -239,6 +262,15 @@ body {
   display: block; margin-bottom: 2px;
 }
 .modal-field-val { font-family: 'Rajdhani', sans-serif; font-size: 15px; font-weight: 600; color: var(--black); line-height: 1.5; }
+.phone-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.copy-btn {
+  background: var(--black); color: var(--white); border: none;
+  padding: 4px 10px; font-family: 'Space Mono', monospace; font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  cursor: pointer; transition: background 0.15s;
+}
+.copy-btn:hover { background: #333; }
+.copy-btn.copied { background: var(--red); }
 
 .modal-services-val { background: rgba(0,0,0,0.07); padding: 8px 10px; font-size: 14px; line-height: 1.6; font-family: 'Rajdhani', sans-serif; }
 .modal-notes-val { background: rgba(0,0,0,0.07); padding: 8px 10px; font-size: 14px; line-height: 1.6; font-family: 'Rajdhani', sans-serif; }
@@ -281,6 +313,13 @@ body {
   color: var(--black); letter-spacing: 2px; text-transform: uppercase; line-height: 1;
 }
 .footer-logo-main img { max-height: 36px; width: auto; display: block; }
+.footer-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+#lastUpdated { font-size: 12px; color: var(--faint); letter-spacing: 0.5px; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
 </style>
 </head>
 <body>
@@ -312,6 +351,7 @@ body {
       <select id="cityFilter" aria-label="Filter by city">
         <option value="all">All Cities</option>
       </select>
+      <button class="near-btn" id="nearMeBtn" type="button" title="Find businesses near your current city">📍 Near Me</button>
     </div>
     <a href="https://forms.gle/6yPvg3QR54nCB1og7" target="_blank" rel="noopener noreferrer" class="add-btn">+ Add Business</a>
   </div>
@@ -322,6 +362,7 @@ body {
 
   <div id="statusMsg" role="status" aria-live="polite">Loading directory data…</div>
   <div id="resultCount"></div>
+  <div id="liveRegion" class="visually-hidden" role="status" aria-live="polite"></div>
 
   <div id="directory" aria-label="Business directory">
     <div class="cat-block" id="blockTailor"><span class="cat-heading">Tailors</span><div id="listTailor"></div></div>
@@ -338,7 +379,10 @@ body {
         <img src="index2html.png" alt="Feat Logo">
       </div>
     </div>
-    <span>Community-built · Not-for-profit</span>
+    <div class="footer-meta">
+      <span>Community-built · Not-for-profit</span>
+      <span id="lastUpdated"></span>
+    </div>
   </footer>
 
 </div>
@@ -347,8 +391,11 @@ body {
   <div class="modal-card">
     <button class="modal-close" id="modalCloseBtn" aria-label="Close">× Close [Esc]</button>
     <div class="modal-header">
-      <div class="modal-biz-name" id="modalBizName"></div>
-      <span class="modal-cat-badge" id="modalCat"></span>
+      <div class="modal-header-text">
+        <div class="modal-biz-name" id="modalBizName"></div>
+        <span class="modal-cat-badge" id="modalCat"></span>
+      </div>
+      <button class="share-btn" id="shareBtn" type="button">⇪ Share</button>
     </div>
     <div class="modal-body" id="modalBody"></div>
   </div>
@@ -440,6 +487,17 @@ function ensureKeys(data) {
 }
 
 /* ============================================================
+   URL PARAM HELPERS (admin cache-bust: ?refresh=1)
+   ============================================================ */
+function wantsForceRefresh() {
+  try {
+    return new URLSearchParams(window.location.search).get("refresh") === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+/* ============================================================
    CACHE LAYER — localStorage with sessionStorage overflow (Fix #4)
    ============================================================ */
 function readCache() {
@@ -494,14 +552,15 @@ let activeCity     = "all";
 let searchQuery    = "";
 let usingStaleCache = false;
 let _retryTimer    = null;
+let lastUpdatedTs  = null; // Fix: "last updated" footer timestamp
 
 const RENDER_GROUPS = [
-  { cats:["tailor"],     keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor"  },
-  { cats:["cobbler"],    keywords:["cobbler","mochi"], listId:"listCobbler", blockId:"blockCobbler" },
-  { cats:["dry","rafu"], keywords:["dry","rafu"],      listId:"listCleaner", blockId:"blockCleaner" },
-  { cats:["dyer"],       keywords:["dyer"],            listId:"listDyer",    blockId:"blockDyer"    },
-  { cats:["scrap"],      keywords:["scrap"],           listId:"listScrap",   blockId:"blockScrap"   },
-  { cats:["other"],      keywords:["other"],           listId:"listOther",   blockId:"blockOther"   },
+  { cats:["tailor"],     keywords:["tailor"],          listId:"listTailor",  blockId:"blockTailor",  label: "tailors"            },
+  { cats:["cobbler"],    keywords:["cobbler","mochi"], listId:"listCobbler", blockId:"blockCobbler", label: "mochis/cobblers"    },
+  { cats:["dry","rafu"], keywords:["dry","rafu"],      listId:"listCleaner", blockId:"blockCleaner", label: "dry cleaners/rafu workers" },
+  { cats:["dyer"],       keywords:["dyer"],            listId:"listDyer",    blockId:"blockDyer",    label: "dyers"              },
+  { cats:["scrap"],      keywords:["scrap"],           listId:"listScrap",   blockId:"blockScrap",   label: "scrap collectors"   },
+  { cats:["other"],      keywords:["other"],           listId:"listOther",   blockId:"blockOther",   label: "other listings"     },
 ];
 
 function esc(s) {
@@ -566,9 +625,11 @@ function scheduleStaleRetry(cachedEntry) {
         if (normalized.length === 0) return; // still bad — leave stale data up
         DATA = normalized;
         usingStaleCache = false;
+        lastUpdatedTs = Date.now();
         writeCache(DATA);
         buildCityDropdown();
         render();
+        renderLastUpdated();
       })
       .catch(() => {
         // Still failing — silent. User stays on stale data, no error flash.
@@ -578,16 +639,21 @@ function scheduleStaleRetry(cachedEntry) {
 
 /* ============================================================
    DATA LOADING — cache-first → stale-while-revalidate → error
+   Admin cache-bust: ?refresh=1 in the URL skips the cache entirely
+   and forces a fresh network fetch (Fix #8).
    ============================================================ */
 function loadData() {
-  const cached = readCache();
+  const forceRefresh = wantsForceRefresh();
+  const cached = forceRefresh ? null : readCache();
 
   // 1. Fresh cache: use immediately, skip network.
   if (isCacheFresh(cached)) {
     DATA = cached.data;
     usingStaleCache = false;
+    lastUpdatedTs = cached.ts;
     buildCityDropdown();
     render();
+    renderLastUpdated();
     return;
   }
 
@@ -596,11 +662,13 @@ function loadData() {
   if (cached) {
     DATA = cached.data;
     usingStaleCache = true;
+    lastUpdatedTs = cached.ts;
     buildCityDropdown();
     render();
+    renderLastUpdated();
     scheduleStaleRetry(cached);
   } else {
-    // 3. No cache at all: show skeleton while we wait.
+    // 3. No cache at all (or forced refresh): show skeleton while we wait.
     showSkeleton();
   }
 
@@ -617,10 +685,12 @@ function loadData() {
       }
       DATA = normalized;
       usingStaleCache = false;
+      lastUpdatedTs = Date.now();
       clearTimeout(_retryTimer);
       writeCache(DATA);
       buildCityDropdown();
       render();
+      renderLastUpdated();
     })
     .catch(() => {
       clearTimeout(_retryTimer);
@@ -628,8 +698,10 @@ function loadData() {
         // Had stale data — keep it, schedule another retry.
         DATA = cached.data;
         usingStaleCache = true;
+        lastUpdatedTs = cached.ts;
         buildCityDropdown();
         render();
+        renderLastUpdated();
         scheduleStaleRetry(cached);
       } else {
         // No cache, no network — show error.
@@ -704,12 +776,11 @@ function render() {
 
   if (total === 0) {
     s.className = "";
-    s.textContent = searchQuery.trim()
-      ? `No matches for "${searchQuery.trim()}".`
-      : "No results found. Be the first to add one!";
+    s.innerHTML = buildEmptyStateMessage();
     s.style.display = "block";
     dir.style.display = "none";
     c.style.display   = "none";
+    announce(s.textContent);
     return;
   }
 
@@ -726,6 +797,31 @@ function render() {
   }
 }
 
+/* Fix #7 (empty state): category + city aware message that turns
+   a dead end into a call-to-action to add the missing listing.  */
+function buildEmptyStateMessage() {
+  const ADD_URL = "https://forms.gle/6yPvg3QR54nCB1og7";
+  if (searchQuery.trim()) {
+    return `No matches for "${esc(searchQuery.trim())}".`;
+  }
+
+  let subject = "listings";
+  if (activeCat !== "all") {
+    const g = RENDER_GROUPS.find(g => g.cats.includes(activeCat));
+    if (g) subject = g.label;
+  }
+
+  let citySuffix = "";
+  if (activeCity !== "all") {
+    const sel = document.getElementById("cityFilter");
+    const cityLabel = sel && sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : activeCity;
+    citySuffix = ` in ${esc(cityLabel)}`;
+  }
+
+  return `No ${subject} listed${citySuffix} yet — be the first to add one!`
+    + ` <a class="status-add-link" href="${ADD_URL}" target="_blank" rel="noopener noreferrer">+ Add Business</a>`;
+}
+
 function createCard(d) {
   const svc = d.services;
   const t   = svc.length > 40 ? svc.slice(0, 40) + "…" : svc;
@@ -735,6 +831,40 @@ function createCard(d) {
     <span class="l-phone">${esc(d.phone)}</span>
     ${t ? `<div class="l-services">${esc(t)}</div>` : ""}
   </div>`;
+}
+
+/* ============================================================
+   LAST UPDATED FOOTER (relative time, refreshed every 60s)
+   ============================================================ */
+function relativeTime(ts) {
+  if (!ts) return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} day${diffDay !== 1 ? "s" : ""} ago`;
+}
+
+function renderLastUpdated() {
+  const el = document.getElementById("lastUpdated");
+  if (!el) return;
+  if (!lastUpdatedTs) { el.textContent = ""; return; }
+  el.textContent = `Directory last updated: ${relativeTime(lastUpdatedTs)}`;
+}
+setInterval(renderLastUpdated, 60 * 1000);
+
+/* ============================================================
+   ACCESSIBILITY: shared live region announcer
+   ============================================================ */
+function announce(msg) {
+  const el = document.getElementById("liveRegion");
+  if (!el) return;
+  el.textContent = "";
+  // Re-set on next tick so repeated identical messages still announce.
+  setTimeout(() => { el.textContent = msg || ""; }, 30);
 }
 
 /* ============================================================
@@ -754,9 +884,83 @@ const handleSearchInput = debounce(function () {
 }, SEARCH_DEBOUNCE_MS);
 
 /* ============================================================
-   MODAL
-   MODAL
+   COPY PHONE NUMBER
    ============================================================ */
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback for older/insecure contexts.
+  return new Promise((resolve, reject) => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("copy failed"));
+    } catch (e) { reject(e); }
+  });
+}
+
+/* ============================================================
+   SHARE A LISTING
+   ============================================================ */
+function shareListing(d) {
+  const text = `${d.name}${d.category ? " (" + d.category + ")" : ""}\n`
+    + (d.phone ? `📞 ${d.phone}\n` : "")
+    + (d.city ? `📍 ${d.city}\n` : "")
+    + `\nFound via FEAT. PAGES — India Repair Directory`;
+
+  if (navigator.share) {
+    navigator.share({ title: d.name, text, url: window.location.href }).catch(() => { /* user cancelled — ignore */ });
+    return;
+  }
+  // Fallback: copy the summary text to clipboard.
+  copyText(text).then(() => {
+    announce("Listing details copied to clipboard.");
+    const btn = document.getElementById("shareBtn");
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+  }).catch(() => { announce("Could not copy listing details."); });
+}
+
+/* ============================================================
+   MODAL — with focus trap + a11y announcements
+   ============================================================ */
+let _lastFocusedEl = null;
+let _modalKeydownHandler = null;
+
+function getFocusableInModal() {
+  const modal = document.getElementById("modal");
+  return Array.from(modal.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )).filter(el => el.offsetParent !== null);
+}
+
+function trapFocus(e) {
+  if (e.key !== "Tab") return;
+  const focusable = getFocusableInModal();
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last  = focusable[focusable.length - 1];
+
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function openModal(key) {
   const d = DATA.find(item => item._key === key);
   if (!d) return;
@@ -777,7 +981,10 @@ function openModal(key) {
       <div class="modal-left">
         <div class="modal-field">
           <span class="modal-field-label">Phone Number</span>
-          <span class="modal-field-val">${phone}</span>
+          <span class="modal-field-val phone-row">
+            <span id="modalPhoneText">${phone}</span>
+            ${d.phone ? `<button class="copy-btn" id="copyPhoneBtn" type="button">Copy</button>` : ""}
+          </span>
         </div>
         <div class="modal-field">
           <span class="modal-field-label">Owner / Contact</span>
@@ -798,7 +1005,32 @@ function openModal(key) {
     </div>`;
 
   renderModalImage(imgUrl);
+
+  const copyBtn = document.getElementById("copyPhoneBtn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => {
+      copyText(d.phone).then(() => {
+        copyBtn.textContent = "Copied!";
+        copyBtn.classList.add("copied");
+        announce("Phone number copied.");
+        setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1500);
+      }).catch(() => { announce("Could not copy phone number."); });
+    });
+  }
+
+  const shareBtn = document.getElementById("shareBtn");
+  if (shareBtn) shareBtn.onclick = () => shareListing(d);
+
+  // ── Accessibility: remember focus, open, trap, announce ──
+  _lastFocusedEl = document.activeElement;
   document.getElementById("modal").classList.add("open");
+  announce(`Opened details for ${d.name}`);
+
+  const closeBtn = document.getElementById("modalCloseBtn");
+  if (closeBtn) closeBtn.focus();
+
+  _modalKeydownHandler = trapFocus;
+  document.addEventListener("keydown", _modalKeydownHandler);
 }
 
 function renderModalImage(imgUrl) {
@@ -822,7 +1054,87 @@ function renderModalImage(imgUrl) {
   img.src = imgUrl; // set src AFTER error handler is attached
 }
 
-function closeModal() { document.getElementById("modal").classList.remove("open"); }
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+  if (_modalKeydownHandler) {
+    document.removeEventListener("keydown", _modalKeydownHandler);
+    _modalKeydownHandler = null;
+  }
+  announce("Closed listing details.");
+  // Restore focus to whatever opened the modal (a11y).
+  if (_lastFocusedEl && typeof _lastFocusedEl.focus === "function") {
+    _lastFocusedEl.focus();
+  }
+  _lastFocusedEl = null;
+}
+
+/* ============================================================
+   NEAR ME — Geolocation-based city auto-select
+   Uses the browser Geolocation API to get coordinates, then a
+   free, keyless reverse-geocoding lookup to resolve a city name,
+   which is matched (loosely) against the city dropdown options.
+   No maps, no API key, fails silently/gracefully if unsupported
+   or denied.
+   ============================================================ */
+function findMatchingCityOption(cityGuess) {
+  if (!cityGuess) return null;
+  const sel = document.getElementById("cityFilter");
+  const guess = cityGuess.toLowerCase();
+  const options = Array.from(sel.options).filter(o => o.value !== "all");
+  // Exact match first, then partial/contains match either direction.
+  let match = options.find(o => o.value === guess);
+  if (!match) match = options.find(o => o.value.includes(guess) || guess.includes(o.value));
+  return match ? match.value : null;
+}
+
+function handleNearMe() {
+  const btn = document.getElementById("nearMeBtn");
+  if (!navigator.geolocation) {
+    announce("Location services are not supported on this device.");
+    return;
+  }
+
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = "Locating…";
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const { latitude, longitude } = pos.coords;
+      fetchWithTimeout(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`,
+        FETCH_TIMEOUT_MS
+      )
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(loc => {
+          const cityGuess = loc.city || loc.locality || loc.principalSubdivision || "";
+          const matched = findMatchingCityOption(cityGuess);
+          if (matched) {
+            activeCity = matched;
+            document.getElementById("cityFilter").value = matched;
+            searchQuery = "";
+            document.getElementById("searchInput").value = "";
+            render();
+            announce(`Showing listings near ${cityGuess}.`);
+          } else {
+            announce(cityGuess ? `No listings yet for ${cityGuess}.` : "Could not determine your city.");
+          }
+        })
+        .catch(() => announce("Could not determine your city right now."))
+        .finally(() => { btn.disabled = false; btn.textContent = originalLabel; });
+    },
+    err => {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      if (err.code === err.PERMISSION_DENIED) {
+        announce("Location access was denied.");
+      } else {
+        announce("Could not get your location.");
+      }
+    },
+    { timeout: FETCH_TIMEOUT_MS, maximumAge: 5 * 60 * 1000 }
+  );
+}
 
 /* ============================================================
    EVENT WIRING
@@ -844,6 +1156,8 @@ document.getElementById("cityFilter").addEventListener("change", function () {
   render();
 });
 
+document.getElementById("nearMeBtn").addEventListener("click", handleNearMe);
+
 document.getElementById("searchInput").addEventListener("input", handleSearchInput);
 
 document.getElementById("directory").addEventListener("click", e => {
@@ -861,7 +1175,7 @@ document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
 document.getElementById("modal").addEventListener("click", e => {
   if (e.target === document.getElementById("modal")) closeModal();
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && document.getElementById("modal").classList.contains("open")) closeModal(); });
 
 /* ── Boot ── */
 loadData();
